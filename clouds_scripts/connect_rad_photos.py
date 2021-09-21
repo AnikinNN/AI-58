@@ -3,9 +3,9 @@ import re
 import pandas as pd
 from path import *
 
+
 def get_full_path(photo_name):
     return os.path.join(photos_base_dir, "snapshots-" + extract_time(photo_name)[:10], photo_name)
-
 
 
 def extract_time(file_name):

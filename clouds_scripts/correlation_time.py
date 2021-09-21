@@ -1,10 +1,4 @@
 import re
-import matplotlib.pyplot as plt
-from scipy import stats
-from numpy import ma
-import imageio
-import os
-import pandas as pd
 import numpy as np
 
 from compute_features import resize4x, HSV, get_masked_image
@@ -120,8 +114,6 @@ def compute_correlations(row: pd.Series):
 
             if current_correlation < correlation_thresholds[0]:
                 break
-        a = 5
-
     return row.append(pd.Series(result))
 
 
