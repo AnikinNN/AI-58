@@ -8,6 +8,7 @@ rad_dir = r"E:\AI-58\clouds_radiation"
 observations_table_dir = r"E:\AI-58\clouds_observations"
 tolerance = pd.Timedelta("10sec")
 process_number = 1
+anomaly_threshold = 0.8
 
 photos_dirs = list(os.path.join(photos_base_dir, i) for i in
                    [

@@ -20,15 +20,25 @@ def extract_time(file_name):
     return result
 
 
-def connect_rad_photos(photos_path, rad_path, tolerance: pd.Timedelta, save_to_path=None):
+def get_photo_names(photos_path):
     photos = []
-
     # get list of photos names
     if os.path.isdir(photos_path):
-        photos.extend(os.listdir(photos_path))
+        # there can be two situations:
+        #     - photos_path contains photos: "img-2021-07-26T15-25-46devID1.jpg"
+        #     - photos_path contains subfolders: "snapshots-2021-07-26"
+        photos_path_content = os.listdir(photos_path)
+        for content in photos_path_content:
+            if re.findall(r"img-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}devID[0-9]+.jpg", content):
+                photos.append(content)
+            elif re.findall(r"snapshots-[0-9]{4}-[0-9]{2}-[0-9]{2}\Z", content):
+                photos.extend(os.listdir(os.path.join(photos_path, content)))
+    return photos
 
+
+def connect_rad_photos(photos_path, rad_path, tolerance: pd.Timedelta, save_to_path=None, verbose=False):
     # create DataFrame
-    photos = pd.DataFrame(photos, columns=["photos"])
+    photos = pd.DataFrame(get_photo_names(photos_path), columns=["photos"])
 
     # extract time and cast to DateTime
     photos["photo_time"] = list(extract_time(i) for i in photos["photos"])
@@ -83,7 +93,7 @@ def connect_rad_photos(photos_path, rad_path, tolerance: pd.Timedelta, save_to_p
         merged.to_csv(save_to_path)
 
     # set condition to False to disable printing
-    if 0:
+    if verbose:
         print("connect_rad_photos() log:\n")
         print("photos DataFrame:")
         print(photos)
@@ -110,7 +120,8 @@ if __name__ == '__main__':
     photos_path = os.path.join(photos_base_dir, "snapshots-2021-08-03")
 
     connect_rad_photos(photos_path, rad_dir, tolerance,
-                       save_to_path=synthetic_database_path)
+                       save_to_path=synthetic_database_path,
+                       verbose=True)
 
     assert os.path.exists(synthetic_database_path)
     assert os.path.getsize(synthetic_database_path) > 100
@@ -119,11 +130,16 @@ if __name__ == '__main__':
 
     photos_path = os.path.join(photos_base_dir, "snapshots-2021-07-26")
     connect_rad_photos(photos_path, rad_dir, tolerance,
-                       save_to_path=synthetic_database_path)
+                       save_to_path=synthetic_database_path,
+                       verbose=True)
     assert os.path.exists(synthetic_database_path)
     # if Dataframe is empty, but there is a header, that is why size is never zero
     assert os.path.getsize(synthetic_database_path) < 100
     assert len(pd.read_csv(synthetic_database_path)) == 0
+
+    photos_path = photos_base_dir
+    connect_rad_photos(photos_path, rad_dir, tolerance,
+                       verbose=True)
 
 
 
