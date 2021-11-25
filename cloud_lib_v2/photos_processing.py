@@ -1,6 +1,8 @@
 import os
 import re
 
+import pandas as pd
+
 
 def get_photo_names(photos_path):
     photos = []
@@ -32,3 +34,35 @@ def extract_time(file_name):
     result += " "
     result += re.findall("T[0-9]{2}-[0-9]{2}-[0-9]{2}", file_name)[0][1:].replace("-", ":")
     return result
+
+
+def init_events(photos_base_dir):
+    """
+        searches all photos in photos_base_dir
+        creates new DataFrame with photos
+        fields columns:
+            photo_name
+            photo_path
+            photo_datetime
+            camera_id
+        sorts by photo_datetime
+    """
+    photo_names = get_photo_names(photos_base_dir)
+    df_events = pd.DataFrame(photo_names, columns=["photo_name"])
+
+    df_events["photo_path"] = df_events.apply(
+        lambda x: get_full_path(x["photo_name"], photos_base_dir),
+        axis=1
+    )
+
+    df_events["camera_id"] = df_events.apply(
+        lambda x: int(x["photo_name"][28: -4]),
+        axis=1)
+
+    df_events["photo_datetime"] = df_events.apply(
+        lambda x: extract_time(x["photo_name"]),
+        axis=1)
+    df_events["photo_datetime"] = pd.to_datetime(df_events["photo_datetime"])
+
+    df_events.sort_values(by="photo_datetime", inplace=True)
+    return df_events

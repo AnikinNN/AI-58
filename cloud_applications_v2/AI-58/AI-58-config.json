@@ -2,7 +2,7 @@
   "expedition_name": "AI-58",
   "mask_dir": "E:\\AI-58-files\\masks",
   "radiation_dir": "E:\\AI-58-files\\clouds_radiation",
-  "observations_dir": "E:\\AI-58-files\\clouds_observations",
+  "observations_table": "E:\\AI-58-files\\clouds_observations\\AI58-observations.csv",
   "photos_base_dir": "E:\\AI-58-files\\clouds_photos",
   "resize": true,
   "time_tolerance": "10sec",

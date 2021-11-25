@@ -34,4 +34,5 @@ def read_radiation_from_dir(radiation_dir):
             radiation = radiation.append(read_single_radiation_file(os.path.join(radiation_dir, file)))
     radiation["radiation_datetime"] = pd.to_datetime(radiation['data time'], format="%d/%m/%Y %H:%M:%S")
     radiation.drop(columns='data time', inplace=True)
+    radiation.sort_values(by="radiation_datetime", inplace=True)
     return radiation

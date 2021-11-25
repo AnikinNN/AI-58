@@ -3,15 +3,21 @@ import os.path
 import re
 import sys
 
+import imageio
+import numpy as np
 import pandas as pd
+from numpy import ma
+from tqdm import tqdm
 
-from cloud_lib_v2 import photos_processing, read_radiation
+from cloud_lib_v2 import photos_processing, read_radiation, image_processing
 from cloud_lib_v2.mask import Mask
 
 
 class Expedition:
     """
-        Класс описывает отдельно взятую экспедицию
+        Class describes a singe expedition
+        event oriented class
+        event is a taken photo
     """
 
     def __init__(self, config_json_path):
@@ -19,21 +25,20 @@ class Expedition:
         #   key is a camera id
         #   value is an instance of Mask
         self.masks = dict()
-
         # determines usage of downscaling to improve time of calculations
         self.resize = None
-
         # probably we will need that
         self.expedition_name = None
-
         # path to radiation data
         # must contain only "CR20[0-9]{6}.txt" files
         self.radiation_dir = None
-        # path to observations data
-        self.observations_dir = None
-
+        # path to observations table
+        self.observations_table = None
+        # path to photos
         self.photos_base_dir = None
+        # time tolerance to apply merge
         self.time_tolerance = None
+        # autocorrelations below this threshold marks as anomalies
         self.anomaly_threshold = None
 
         # read config
@@ -45,10 +50,13 @@ class Expedition:
         except OSError as error:
             pass
 
-        # dataFrames based on radiation measurement and photos respectively
+        # dataFrames based on radiation measurement, photos and observations respectively
         self.df_radiation = pd.DataFrame()
         self.df_events = pd.DataFrame()
-        print()
+        self.df_observations = pd.DataFrame()
+
+        # progress bar
+        self.progress_bar = None
 
     def set_configuration_using_json(self, config_json_path):
         # load config from json
@@ -69,43 +77,120 @@ class Expedition:
         # save constants
         self.expedition_name = config["expedition_name"]
         self.radiation_dir = config["radiation_dir"]
-        self.observations_dir = config["observations_dir"]
+        self.observations_table = config["observations_table"]
         self.photos_base_dir = config["photos_base_dir"]
         self.time_tolerance = pd.Timedelta(config["time_tolerance"])
         self.anomaly_threshold = config["anomaly_threshold"]
 
     def init_events(self):
-        """
-            searches all photos in self.photos_base_dir
-            creates new DataFrame with photos
-            fields columns:
-                photo_name
-                photo_path
-                photo_datetime
-                camera_id
-            sorts by photo_datetime
-        """
-        photo_names = photos_processing.get_photo_names(self.photos_base_dir)
-        self.df_events = pd.DataFrame(photo_names, columns=["photo_name"])
-
-        self.df_events["photo_path"] = self.df_events.apply(
-            lambda x: photos_processing.get_full_path(x["photo_name"], self.photos_base_dir),
-            axis=1
-        )
-
-        self.df_events["camera_id"] = self.df_events.apply(
-            lambda x: int(x["photo_name"][28: -4]),
-            axis=1)
-
-        self.df_events["photo_datetime"] = self.df_events.apply(
-            lambda x: photos_processing.extract_time(x["photo_name"]),
-            axis=1)
-        self.df_events["photo_datetime"] = pd.to_datetime(self.df_events["photo_datetime"])
-
-        self.df_events.sort_values(by="photo_datetime", inplace=True)
+        self.df_events = photos_processing.init_events(self.photos_base_dir)
 
     def init_radiation(self):
         self.df_radiation = read_radiation.read_radiation_from_dir(self.radiation_dir)
 
     def init_observation(self):
-        pass
+        if self.observations_table.endswith("xlsx"):
+            self.df_observations = pd.read_excel(self.observations_table)
+        elif self.observations_table.endswith("csv"):
+            self.df_observations = pd.read_csv(self.observations_table)
+
+        self.df_observations.rename(columns={"Date_Time": "observation_datetime"}, inplace=True)
+        self.df_observations["observation_datetime"] = pd.to_datetime(self.df_observations["observation_datetime"])
+        self.df_observations.sort_values(by="observation_datetime", inplace=True)
+
+    def merge_radiation_to_events(self, inplace=True):
+        """
+        merge DataFrames, for each df_events row find nearest row in time from df_radiation
+        nearest means that we take nearest after photo, because of experiment design
+        write everything in one DataFrame
+        if there is no row in df_radiation that fits to tolerance condition, writes NaN
+
+        inplace: write result of merge to df_events
+
+        return: result of merge
+        """
+        self.df_events.sort_values(by="photo_datetime", inplace=True)
+        self.df_radiation.sort_values(by="radiation_datetime", inplace=True)
+
+        merged = pd.merge_asof(self.df_events, self.df_radiation,
+                               left_on="photo_datetime",
+                               right_on="radiation_datetime",
+                               direction="forward",
+                               tolerance=self.time_tolerance
+                               )
+        if inplace:
+            self.df_events = merged
+        return merged
+
+    def merge_observations_to_events(self, inplace=True):
+        """
+        merge DataFrames, for each df_events row find nearest row in time from df_observations
+        nearest means that we take nearest after photo, because of experiment design
+        write everything in one DataFrame
+        if there is no row in df_observations that fits to tolerance condition, writes NaN
+
+        inplace: write result of merge to df_events
+
+        return: result of merge
+        """
+        self.df_events.sort_values(by="photo_datetime", inplace=True)
+        self.df_observations.sort_values(by="observation_datetime", inplace=True)
+
+        merged = pd.merge_asof(self.df_events, self.df_observations,
+                               left_on="photo_datetime",
+                               right_on="observation_datetime",
+                               direction="forward",
+                               tolerance=self.time_tolerance
+                               )
+        if inplace:
+            self.df_events = merged
+        return merged
+
+    def delete_outside_datetime(self, a_datetime, b_datetime):
+        """
+        deletes rows from df_observations, df_radiation, df_events
+        that are out of range [a_datetime, b_datetime]
+        """
+        a_datetime = pd.to_datetime(a_datetime)
+        b_datetime = pd.to_datetime(b_datetime)
+
+        # swap if needed
+        if a_datetime > b_datetime:
+            a_datetime, b_datetime = b_datetime, a_datetime
+
+        selection = (self.df_events["photo_datetime"] > a_datetime) & (
+                self.df_events["photo_datetime"] < b_datetime)
+        self.df_events = self.df_events[selection]
+
+        selection = (self.df_radiation["radiation_datetime"] > a_datetime) & (
+                    self.df_radiation["radiation_datetime"] < b_datetime)
+        self.df_radiation = self.df_radiation[selection]
+
+        selection = (self.df_observations["observation_datetime"] > a_datetime) & (
+                    self.df_observations["observation_datetime"] < b_datetime)
+        self.df_observations = self.df_observations[selection]
+
+    def compute_statistic_features(self):
+        print("computing_statistic_features")
+        self.progress_bar = tqdm(total=self.df_events.shape[0], position=0, leave=True)
+        self.df_events = self.df_events.apply(self._compute_statistic_features_for_one_event, axis=1)
+        self.progress_bar = None
+
+    def _compute_statistic_features_for_one_event(self, row: pd.Series):
+        camera_id = row["camera_id"]
+        img = imageio.imread(row["photo_path"])
+
+        if self.resize:
+            img = image_processing.resize4x(img).astype(np.uint8)
+
+        if camera_id in self.masks.keys():
+            img = np.reshape(ma.array(img, mask=self.masks[camera_id]), (-1, 3))
+
+        features = image_processing.calculate_features(img)
+        features_index = list("feature" + str(i) for i in range(features.shape[0]))
+        features_series = pd.Series(features, index=features_index)
+        row = row.append(features_series)
+        self.progress_bar.update()
+        return row
+
+
