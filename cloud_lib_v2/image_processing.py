@@ -42,11 +42,8 @@ def HSV(img: np.ndarray):
 
 def calculate_features(image):
     features = np.zeros(0)
-    canals = list(image[:, j] for j in range(3))
-    # Add hsv canals
-    canals.extend(HSV(image))
 
-    for canal in canals:
+    for canal in image:
         features = np.hstack(
             [
                 features,
@@ -60,3 +57,7 @@ def calculate_features(image):
             ]
         )
     return features
+
+
+def compute_correlation(a, b):
+    return np.corrcoef(a, b)[0, 1]

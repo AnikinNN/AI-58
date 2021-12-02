@@ -4,8 +4,10 @@ import re
 import sys
 
 import imageio
+import swifter
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
 from numpy import ma
 from tqdm import tqdm
 
@@ -21,6 +23,8 @@ class Expedition:
     """
 
     def __init__(self, config_json_path):
+        # cores
+        self.core_number = 6
         # masks:
         #   key is a camera id
         #   value is an instance of Mask
@@ -47,7 +51,7 @@ class Expedition:
         self.output_dir = sys.argv[0][:-3] + "_output"
         try:
             os.mkdir(self.output_dir)
-        except OSError as error:
+        except OSError:
             pass
 
         # dataFrames based on radiation measurement, photos and observations respectively
@@ -98,6 +102,9 @@ class Expedition:
         self.df_observations["observation_datetime"] = pd.to_datetime(self.df_observations["observation_datetime"])
         self.df_observations.sort_values(by="observation_datetime", inplace=True)
 
+    def sort_events(self):
+        self.df_events.sort_values(by="photo_datetime", inplace=True)
+
     def merge_radiation_to_events(self, inplace=True):
         """
         merge DataFrames, for each df_events row find nearest row in time from df_radiation
@@ -109,7 +116,7 @@ class Expedition:
 
         return: result of merge
         """
-        self.df_events.sort_values(by="photo_datetime", inplace=True)
+        self.sort_events()
         self.df_radiation.sort_values(by="radiation_datetime", inplace=True)
 
         merged = pd.merge_asof(self.df_events, self.df_radiation,
@@ -133,7 +140,7 @@ class Expedition:
 
         return: result of merge
         """
-        self.df_events.sort_values(by="photo_datetime", inplace=True)
+        self.sort_events()
         self.df_observations.sort_values(by="observation_datetime", inplace=True)
 
         merged = pd.merge_asof(self.df_events, self.df_observations,
@@ -163,28 +170,41 @@ class Expedition:
         self.df_events = self.df_events[selection]
 
         selection = (self.df_radiation["radiation_datetime"] > a_datetime) & (
-                    self.df_radiation["radiation_datetime"] < b_datetime)
+                self.df_radiation["radiation_datetime"] < b_datetime)
         self.df_radiation = self.df_radiation[selection]
 
         selection = (self.df_observations["observation_datetime"] > a_datetime) & (
-                    self.df_observations["observation_datetime"] < b_datetime)
+                self.df_observations["observation_datetime"] < b_datetime)
         self.df_observations = self.df_observations[selection]
 
-    def compute_statistic_features(self):
-        print("computing_statistic_features")
-        self.progress_bar = tqdm(total=self.df_events.shape[0], position=0, leave=True)
-        self.df_events = self.df_events.apply(self._compute_statistic_features_for_one_event, axis=1)
-        self.progress_bar = None
-
-    def _compute_statistic_features_for_one_event(self, row: pd.Series):
+    def get_image(self, row: pd.Series):
         camera_id = row["camera_id"]
         img = imageio.imread(row["photo_path"])
-
         if self.resize:
             img = image_processing.resize4x(img).astype(np.uint8)
 
         if camera_id in self.masks.keys():
-            img = np.reshape(ma.array(img, mask=self.masks[camera_id]), (-1, 3))
+            img = np.reshape(ma.array(img, mask=self.masks[camera_id].mask), (-1, 3))
+
+        canals = list(img[:, j] for j in range(3))
+        canals.extend(image_processing.HSV(img))
+        return canals
+
+    def split_to_batches(self):
+        pass
+
+    def compute_statistic_features(self):
+        print(f"computing_statistic_features")
+        self.progress_bar = tqdm(total=self.df_events.shape[0], position=0, leave=True)
+        self.df_events = self.df_events.apply(self._compute_statistic_features_for_one_event, axis=1)
+        # with mp.Pool(self.core_number) as pool:
+        #     result = pool.map(self._compute_statistic_features_for_one_event, self.df_events.iterrows())
+        # self.df_events = self.df_events.apply(self._compute_statistic_features_for_one_event, axis=1)
+        self.progress_bar.close()
+        self.progress_bar = None
+
+    def _compute_statistic_features_for_one_event(self, row: pd.Series):
+        img = self.get_image(row)
 
         features = image_processing.calculate_features(img)
         features_index = list("feature" + str(i) for i in range(features.shape[0]))
@@ -193,4 +213,28 @@ class Expedition:
         self.progress_bar.update()
         return row
 
+    def _compute_correlation_to_previous_for_one_event(self, row: pd.Series):
+        # find previous event
+        prev_img = None
+        prev_index = row.name
+        while prev_img is None and prev_index > 0:
+            prev_index -= 1
+            if self.df_events.iloc[prev_index]["camera_id"] == row["camera_id"]:
+                prev_img = self.get_image(self.df_events.iloc[prev_index])
 
+        current_img = self.get_image(row)
+        corr = image_processing.compute_correlation(current_img[5], prev_img[5]) if prev_img is not None else None
+        self.progress_bar.update()
+        return corr
+
+    def compute_correlation_to_previous(self):
+
+        self.sort_events()
+        self.df_events = self.df_events.reset_index(drop=True)
+
+        print("computing_correlation_to_previous")
+        self.progress_bar = tqdm(total=self.df_events.shape[0], position=0, leave=True)
+        self.df_events["correlation_to_previous"] = self.df_events.apply(
+            self._compute_correlation_to_previous_for_one_event, axis=1)
+        self.progress_bar.close()
+        self.progress_bar = None

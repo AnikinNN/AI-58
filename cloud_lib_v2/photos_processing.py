@@ -1,5 +1,7 @@
+import datetime
 import os
 import re
+import sys
 
 import pandas as pd
 
@@ -22,6 +24,21 @@ def get_photo_names(photos_path):
 
 def get_full_path(photo_name, photos_base_dir):
     return os.path.join(photos_base_dir, "snapshots-" + extract_time(photo_name)[:10], photo_name)
+
+
+def get_full_path_on_series(photo_names: pd.Series, photos_base_dir: str):
+    if sys.platform.startswith("win"):
+        separator = "\\"
+    else:
+        separator = "/"
+    separators = "\\/"
+
+    date = photo_names.map(lambda x: x[4:14])
+
+    if photos_base_dir[-1] not in separators:
+        photos_base_dir += separator
+
+    return photos_base_dir + "snapshots-" + date + separator + photo_names
 
 
 def extract_time(file_name):
@@ -50,19 +67,14 @@ def init_events(photos_base_dir):
     photo_names = get_photo_names(photos_base_dir)
     df_events = pd.DataFrame(photo_names, columns=["photo_name"])
 
-    df_events["photo_path"] = df_events.apply(
-        lambda x: get_full_path(x["photo_name"], photos_base_dir),
-        axis=1
-    )
+    df_events["photo_datetime"] = df_events["photo_name"].map(extract_time)
 
-    df_events["camera_id"] = df_events.apply(
-        lambda x: int(x["photo_name"][28: -4]),
-        axis=1)
+    df_events["photo_path"] = get_full_path_on_series(df_events["photo_name"], photos_base_dir)
 
-    df_events["photo_datetime"] = df_events.apply(
-        lambda x: extract_time(x["photo_name"]),
-        axis=1)
+    df_events["camera_id"] = df_events["photo_name"].map(lambda x: int(x[28: -4]))
+
     df_events["photo_datetime"] = pd.to_datetime(df_events["photo_datetime"])
 
     df_events.sort_values(by="photo_datetime", inplace=True)
+
     return df_events

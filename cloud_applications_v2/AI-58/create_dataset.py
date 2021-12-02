@@ -11,5 +11,6 @@ ai_58.merge_radiation_to_events()
 ai_58.merge_observations_to_events()
 ai_58.delete_outside_datetime("2021-08-11 10:00:00", "2021-08-11 09:59:00")
 ai_58.compute_statistic_features()
+ai_58.compute_correlation_to_previous()
 
 print()
