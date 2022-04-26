@@ -4,7 +4,6 @@ import re
 import sys
 
 import imageio
-import swifter
 import numpy as np
 import pandas as pd
 import multiprocessing as mp

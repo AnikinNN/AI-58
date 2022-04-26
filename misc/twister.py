@@ -9,10 +9,6 @@ ends = ["ногу", "руку"]
 
 cont_signal = True
 
-while 1:
+while True:
     input()
     print(f"Поставить {choice(sides)} {choice(ends)} на {choice(colors)} квадрат", end="")
-
-
-
-
