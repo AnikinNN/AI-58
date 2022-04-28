@@ -16,7 +16,7 @@ def read_single_radiation_file(path):
                 columns.append(item)
 
     # read data
-    result = pd.read_table(path, skiprows=14, delimiter="\t", header=None)
+    result = pd.read_csv(path, skiprows=14, delimiter="\t", header=None)
     # delete empty columns
     result = result.drop(labels=[5, 6, 7, 9], axis='columns')
     # assign column names
@@ -30,7 +30,7 @@ def read_radiation_from_dir(radiation_dir):
 
     for file in os.listdir(radiation_dir):
         # filter file names
-        if re.findall("CR20[0-9]{6}.txt", file):
+        if re.findall(r"CR20\d{6}.txt", file):
             radiation = radiation.append(read_single_radiation_file(os.path.join(radiation_dir, file)))
     radiation["radiation_datetime"] = pd.to_datetime(radiation['data time'], format="%d/%m/%Y %H:%M:%S")
     radiation.drop(columns='data time', inplace=True)

@@ -1,12 +1,9 @@
 import json
 import os.path
 import re
-import sys
 
 import imageio
-import numpy as np
 import pandas as pd
-import multiprocessing as mp
 from numpy import ma
 from tqdm import tqdm
 
@@ -46,12 +43,6 @@ class Expedition:
 
         # read config
         self.set_configuration_using_json(config_json_path)
-        # make output dir
-        self.output_dir = sys.argv[0][:-3] + "_output"
-        try:
-            os.mkdir(self.output_dir)
-        except OSError:
-            pass
 
         # dataFrames based on radiation measurement, photos and observations respectively
         self.df_radiation = pd.DataFrame()
@@ -72,8 +63,8 @@ class Expedition:
         # load masks
         for file in os.listdir(config["mask_dir"]):
             # check that mask matches "mask_ID[0-9]+\.png"
-            file = os.path.join(config["mask_dir"], file)
-            if re.findall(r"mask_ID[0-9]+\.png$", file):
+            if re.match(r"mask-id\d+\.png$", file):
+                file = os.path.join(config["mask_dir"], file)
                 mask = Mask(file, self.resize)
                 self.masks[mask.camera_id] = mask
 
@@ -82,7 +73,7 @@ class Expedition:
         self.radiation_dir = config["radiation_dir"]
         self.observations_table = config["observations_table"]
         self.photos_base_dir = config["photos_base_dir"]
-        self.time_tolerance = pd.Timedelta(config["time_tolerance"])
+        self.time_tolerance = pd.to_timedelta(config["time_tolerance"])
         self.anomaly_threshold = config["anomaly_threshold"]
 
     def init_events(self):
@@ -106,8 +97,8 @@ class Expedition:
 
     def merge_radiation_to_events(self, inplace=True):
         """
-        merge DataFrames, for each df_events row find nearest row in time from df_radiation
-        nearest means that we take nearest after photo, because of experiment design
+        merge DataFrames, for each df_events row find the nearest row in time from df_radiation
+        the nearest means that we take nearest after photo, because of experiment design
         write everything in one DataFrame
         if there is no row in df_radiation that fits to tolerance condition, writes NaN
 
@@ -130,8 +121,8 @@ class Expedition:
 
     def merge_observations_to_events(self, inplace=True):
         """
-        merge DataFrames, for each df_events row find nearest row in time from df_observations
-        nearest means that we take nearest after photo, because of experiment design
+        merge DataFrames, for each df_events row find the nearest row in time from df_observations
+        the nearest means that we take nearest after photo, because of experiment design
         write everything in one DataFrame
         if there is no row in df_observations that fits to tolerance condition, writes NaN
 
@@ -164,29 +155,32 @@ class Expedition:
         if a_datetime > b_datetime:
             a_datetime, b_datetime = b_datetime, a_datetime
 
-        selection = (self.df_events["photo_datetime"] > a_datetime) & (
-                self.df_events["photo_datetime"] < b_datetime)
-        self.df_events = self.df_events[selection]
+        if "photo_datetime" in self.df_events.columns:
+            selection = (self.df_events["photo_datetime"] > a_datetime) & (
+                    self.df_events["photo_datetime"] < b_datetime)
+            self.df_events = self.df_events[selection]
 
-        selection = (self.df_radiation["radiation_datetime"] > a_datetime) & (
-                self.df_radiation["radiation_datetime"] < b_datetime)
-        self.df_radiation = self.df_radiation[selection]
+        if "radiation_datetime" in self.df_radiation.columns:
+            selection = (self.df_radiation["radiation_datetime"] > a_datetime) & (
+                    self.df_radiation["radiation_datetime"] < b_datetime)
+            self.df_radiation = self.df_radiation[selection]
 
-        selection = (self.df_observations["observation_datetime"] > a_datetime) & (
-                self.df_observations["observation_datetime"] < b_datetime)
-        self.df_observations = self.df_observations[selection]
+        if "observation_datetime" in self.df_observations.columns:
+            selection = (self.df_observations["observation_datetime"] > a_datetime) & (
+                    self.df_observations["observation_datetime"] < b_datetime)
+            self.df_observations = self.df_observations[selection]
 
     def get_image(self, row: pd.Series):
         camera_id = row["camera_id"]
         img = imageio.imread(row["photo_path"])
         if self.resize:
-            img = image_processing.resize4x(img).astype(np.uint8)
+            img = image_processing.resize4x(img)
 
-        if camera_id in self.masks.keys():
-            img = np.reshape(ma.array(img, mask=self.masks[camera_id].mask), (-1, 3))
+        if int(camera_id) in self.masks.keys():
+            img = ma.array(img, mask=~self.masks[camera_id].mask)
 
-        canals = list(img[:, j] for j in range(3))
-        canals.extend(image_processing.HSV(img))
+        canals = list(img[:, :, j] for j in range(3))
+        canals.extend(image_processing.to_hsv(img))
         return canals
 
     def split_to_batches(self):
@@ -196,9 +190,6 @@ class Expedition:
         print(f"computing_statistic_features")
         self.progress_bar = tqdm(total=self.df_events.shape[0], position=0, leave=True)
         self.df_events = self.df_events.apply(self._compute_statistic_features_for_one_event, axis=1)
-        # with mp.Pool(self.core_number) as pool:
-        #     result = pool.map(self._compute_statistic_features_for_one_event, self.df_events.iterrows())
-        # self.df_events = self.df_events.apply(self._compute_statistic_features_for_one_event, axis=1)
         self.progress_bar.close()
         self.progress_bar = None
 
@@ -227,7 +218,6 @@ class Expedition:
         return corr
 
     def compute_correlation_to_previous(self):
-
         self.sort_events()
         self.df_events = self.df_events.reset_index(drop=True)
 
