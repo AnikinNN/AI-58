@@ -24,7 +24,7 @@ class MetadataLoader:
             self.store_splits(store_path)
 
     def load_data(self, json):
-        expedition = Expedition('./AI-58-config.json')
+        expedition = Expedition(json)
         expedition.init_events()
         expedition.init_radiation()
 
@@ -35,19 +35,19 @@ class MetadataLoader:
 
     def split(self, train_size, validation_size, test_size):
         assert (train_size + validation_size + test_size) <= 1, 'sum of train, validation, test must be less than 1'
-        self.all_df['datehour'] = pd.to_datetime(self.all_df['photo_datetime'].dt.date) + \
-                                  pd.to_timedelta(self.all_df['photo_datetime'].dt.hour, unit='hours')
+        self.all_df['date_hour'] = pd.to_datetime(self.all_df['photo_datetime'].dt.date) + \
+                                   pd.to_timedelta(self.all_df['photo_datetime'].dt.hour, unit='hours')
 
-        train, test = train_test_split(self.all_df['datehour'].unique(),
+        train, test = train_test_split(self.all_df['date_hour'].unique(),
                                        test_size=test_size,
                                        train_size=train_size + validation_size)
         train, validation = train_test_split(train,
                                              test_size=validation_size / (train_size + validation_size),
                                              train_size=train_size / (train_size + validation_size))
 
-        self.train = self.all_df[self.all_df['datehour'].isin(train)]
-        self.validation = self.all_df[self.all_df['datehour'].isin(validation)]
-        self.test = self.all_df[self.all_df['datehour'].isin(test)]
+        self.train = self.all_df[self.all_df['date_hour'].isin(train)]
+        self.validation = self.all_df[self.all_df['date_hour'].isin(validation)]
+        self.test = self.all_df[self.all_df['date_hour'].isin(test)]
 
         for df, name in [(self.all_df, 'overall'),
                          (self.train, 'train'),

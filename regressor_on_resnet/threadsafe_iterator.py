@@ -2,7 +2,6 @@ import threading
 
 import torch
 from torch.autograd import Variable
-from torchvision.transforms import transforms
 
 
 class ThreadsafeIterator:
@@ -38,7 +37,6 @@ class ThreadKiller:
 def threaded_batches_feeder(to_kill, batches_queue, dataset_generator):
     for img, target in dataset_generator:
         batches_queue.put((img, target), block=True)
-        # print('cpu_feeder')
         if to_kill():
             print('cpu_feeder_killed')
             return
@@ -47,15 +45,13 @@ def threaded_batches_feeder(to_kill, batches_queue, dataset_generator):
 def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device):
     while not to_kill():
         device1 = torch.device(cuda_device)
-        print(device1)
         (img, flux) = batches_queue.get(block=True)
 
-        flux = torch.from_numpy(flux)
-        img = torch.from_numpy(img)
+        flux = torch.tensor([[i] for i in flux])
+        img = torch.stack(img)
 
         flux = Variable(flux.float()).to(device1)
         img = Variable(img.float()).to(device1)
         cuda_batches_queue.put((img, flux), block=True)
-        print('gpu_feeder')
-    # print('cuda_feeder_killed')
+    print('cuda_feeder_killed')
     return

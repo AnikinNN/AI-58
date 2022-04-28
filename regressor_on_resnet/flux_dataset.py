@@ -1,17 +1,14 @@
 import os
-import threading
-
-import numpy as np
-import pandas as pd
 import cv2
 import torch
-from imgaug import SegmentationMapsOnImage, augmenters
+import threading
+import numpy as np
 
 from sklearn.utils import shuffle
 from torchvision.transforms import transforms
+from imgaug import SegmentationMapsOnImage, augmenters
 
 from regressor_on_resnet.threadsafe_iterator import ThreadsafeIterator
-# from skimage import io
 
 
 def get_object_index(objects_count):
@@ -24,6 +21,13 @@ def get_object_index(objects_count):
 
 
 class FluxDataset:
+    normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+
+    inv_normalizer = transforms.Compose([
+        transforms.Normalize((0., 0., 0.), (1 / 0.229, 1 / 0.224, 1 / 0.225)),
+        transforms.Normalize((-0.485, -0.456, -0.406), (1., 1., 1.)),
+    ])
+
     def __init__(self, flux_frame, batch_size=32, do_shuffle=True, do_augment=True):
 
         self.flux_frame = flux_frame
@@ -40,14 +44,17 @@ class FluxDataset:
         self.init_count = 0
 
         self.augmentation_sequence = augmenters.Sequential([
-            augmenters.Fliplr(0.5),  # 50% of images will be flipped(left-right)
-            augmenters.Flipud(0.5),  # -.- (up-down)
-            # augmenters.Dropout([0.05, 0.2]),      # drop 5% or 20% of all pixels
-            augmenters.Affine(shear=(-16, 16), rotate=(-45, 45)),  # rotate by -45 to 45 degrees (affects segmaps)
+            augmenters.Fliplr(0.5),
+            augmenters.Flipud(0.5),
+            # augmenters.Dropout([0.05, 0.2]),
+            augmenters.Affine(shear=(-16, 16), rotate=(-45, 45)),
             augmenters.MultiplyAndAddToBrightness(mul=(0.5, 1.5), add=(-30, 30))
         ], random_order=True)
 
         self.output_size = (512, 512)
+
+        self.batch_x = None
+        self.batch_y = None
 
     def __len__(self):
         return self.flux_frame.shape[0]
@@ -85,9 +92,9 @@ class FluxDataset:
         return cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
 
     def load_mask(self, mask_path):
-        image = self.imread(mask_path)
-        image = cv2.resize(image, self.output_size)
-        self.mask_dict[mask_path] = np.where(image[:, :, 0] > 0, True, False)
+        image = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        image = self.resize(image)
+        self.mask_dict[mask_path] = np.where(image > 0, True, False)
 
     def __iter__(self):
         while True:
@@ -95,7 +102,7 @@ class FluxDataset:
                 if self.init_count == 0:
                     self.shuffle_data()
                     # clean batch_data
-                    self.batch_data = []
+                    self.clean_batch()
                     self.init_count = 1
 
             for obj_id in self.objects_id_generator:
@@ -105,30 +112,38 @@ class FluxDataset:
                 mask = curr_data['mask']
                 flux = curr_data['flux']
 
-                image = cv2.resize(image, self.output_size)
-                segmentation_maps = SegmentationMapsOnImage(mask, shape=image.shape)
+                image = self.resize(image)
 
                 if self.do_augment:
-                    image, segmentation_maps = self.augmentation_sequence(image=image, segmentation_maps=segmentation_maps)
-
-                mask = segmentation_maps.draw()[0]
-                mask = np.where(mask > 0, 1, 0).transpose(2, 0, 1)
+                    segmentation_maps = SegmentationMapsOnImage(mask, shape=image.shape)
+                    image, segmentation_maps = self.augmentation_sequence(image=image,
+                                                                          segmentation_maps=segmentation_maps)
+                    mask = segmentation_maps.draw()[0]
+                    mask = np.where(mask > 0, 1, 0).transpose(2, 0, 1)
+                else:
+                    pass
 
                 image = (image / 255.0).transpose(2, 0, 1)
                 image = torch.from_numpy(image)
-                image = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))(image)
+                image = self.normalizer(image)
+
                 image = image * mask
 
                 # Concurrent access by multiple threads to the lists below
                 with self.yield_lock:
-                    if (len(self.batch_data)) < self.batch_size:
-                        self.batch_data.append(
-                            (image, flux))
-
-                    if len(self.batch_data) >= self.batch_size:
+                    if len(self.batch_y) < self.batch_size:
                         # resnet50 require input for 4-dimensional weight [64, 3, 7, 7]
-                        batch_x = np.stack(([i[0] for i in self.batch_data]), axis=0)
-                        batch_y = np.array([i[1] for i in self.batch_data]).reshape([-1, 1])
+                        self.batch_x.append(image)
+                        self.batch_y.append(flux)
 
-                        yield batch_x, batch_y
-                        self.batch_data = []
+                    if len(self.batch_y) >= self.batch_size:
+                        yield self.batch_x, self.batch_y
+                        self.clean_batch()
+
+    def clean_batch(self):
+        self.batch_x = []
+        self.batch_y = []
+
+    def resize(self, image):
+        result = cv2.resize(image, self.output_size)
+        return result

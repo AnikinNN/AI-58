@@ -4,6 +4,7 @@ import re
 import sys
 
 from torch.utils.tensorboard import SummaryWriter
+import torch
 
 
 class Logger:
@@ -34,6 +35,11 @@ class Logger:
             if re.match(r'(tb|misc)_\d{8}_\d{6}_\d+$', directory):
                 numbers.add(int(directory.split('_')[-1]))
         return max(numbers) + 1 if len(numbers) else 1
+
+    def store_batch_as_image(self, tag, batch: torch.Tensor, global_step=None, inv_normalizer=None):
+        if inv_normalizer is not None:
+            batch = torch.stack([inv_normalizer(torch.squeeze(i)) for i in torch.split(batch, 1)], dim=0)
+        self.tb_writer.add_images(tag, batch, global_step=global_step)
 
 
 def make_dir(path):

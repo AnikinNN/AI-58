@@ -1,31 +1,17 @@
 import os
-import re
-import threading
 from threading import Thread
-from queue import Queue, Empty
+from queue import Queue
+from tqdm import tqdm
 
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from torch.autograd import Variable
-from torch.nn import MSELoss
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-
-from tqdm import tqdm, trange
 
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, utils
+from torch.autograd import Variable
+from torch.nn import MSELoss
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
-import imgaug.augmenters as iaa
-from skimage import io, transform
-from sklearn.model_selection import train_test_split
-from sklearn.utils import shuffle
-
-# from cloud_lib_v2.expedition import Expedition
-# from cloud_lib_v2.mask import Mask
 from regressor_on_resnet.flux_dataset import FluxDataset
 from regressor_on_resnet.nn_logging import Logger
 from regressor_on_resnet.metadata_loader import MetadataLoader
@@ -48,12 +34,10 @@ def train_single_epoch(model: torch.nn.Module,
     for batch_idx in range(per_step_epoch):
         data_image, target = cuda_batches_queue.get(block=True)
 
-        # ###### DEBUG plots
-        # if batch_idx == 0:
-        #     plot_examples_segmentation(data_image, target,
-        #                                file_output=os.path.join(logs_basepath,
-        #                                'train_input_ep%04d.png' % current_epoch))
-        # ###### DEBUG plots
+        if batch_idx == 0:
+            logger.store_batch_as_image('train_batch', data_image,
+                                        global_step=current_epoch,
+                                        inv_normalizer=FluxDataset.inv_normalizer)
 
         target = Variable(target)
 
@@ -81,7 +65,6 @@ def validate_single_epoch(model: torch.nn.Module,
                           per_step_epoch: int,
                           current_epoch: int):
     model.eval()
-
     loss_values = []
 
     pbar = tqdm(total=per_step_epoch)
@@ -90,9 +73,10 @@ def validate_single_epoch(model: torch.nn.Module,
         data_image, target = cuda_batches_queue.get(block=True)
         data_out = model(data_image)
 
-        # if batch_idx == 0:
-        #     plot_examples_segmentation(data_image, data_out, file_output = os.path.join(logs_basepath,
-        #     'val_results_ep%04d.png' % current_epoch))
+        if batch_idx == 0:
+            logger.store_batch_as_image('val_batch', data_image,
+                                        global_step=current_epoch,
+                                        inv_normalizer=FluxDataset.inv_normalizer)
 
         loss = loss_function(data_out, target)
         loss_values.append(loss.item())
@@ -114,7 +98,7 @@ def train_model(model: torch.nn.Module,
     # start threads
     cpu_queue_length = 4
     cuda_queue_length = 4
-    preprocess_workers = [0, 4]
+    preprocess_workers = [4, 15]
 
     # contain train: [0] and validation: [1] queues
     cpu_queues = [Queue(maxsize=cpu_queue_length), Queue(maxsize=cpu_queue_length)]
@@ -137,18 +121,18 @@ def train_model(model: torch.nn.Module,
             thr = Thread(target=threaded_batches_feeder, args=(threads_killer, cpu_queues[i], datasets[i]))
             thr.start()
 
-    steps_per_epoch_train = 64
+    steps_per_epoch_train = 1
     steps_per_epoch_valid = len(val_dataset) // batch_size + 1
 
     for epoch in range(max_epochs):
         print(f'Epoch {epoch + 1} / {max_epochs}')
-        # train_loss = train_single_epoch(model,
-        #                                 optimizer,
-        #                                 loss_function,
-        #                                 cuda_queues[0],
-        #                                 steps_per_epoch_train,
-        #                                 current_epoch=epoch)
-        # logger.tb_writer.add_scalar('train_loss_per_epoch', train_loss, epoch)
+        train_loss = train_single_epoch(model,
+                                        optimizer,
+                                        loss_function,
+                                        cuda_queues[0],
+                                        steps_per_epoch_train,
+                                        current_epoch=epoch)
+        logger.tb_writer.add_scalar('train_loss_per_epoch', train_loss, epoch)
 
         val_loss = validate_single_epoch(model,
                                          loss_function,
@@ -180,15 +164,15 @@ metadata_loader = MetadataLoader('./AI-58-config.json',
                                  store_path=logger.misc_dir)
 
 batch_size = 64
-trainset = FluxDataset(flux_frame=metadata_loader.train,
-                       batch_size=batch_size,
-                       do_shuffle=True,
-                       do_augment=True)
+train_set = FluxDataset(flux_frame=metadata_loader.train,
+                        batch_size=batch_size,
+                        do_shuffle=True,
+                        do_augment=True)
 
-valset = FluxDataset(flux_frame=metadata_loader.validation,
-                     batch_size=batch_size,
-                     do_shuffle=False,
-                     do_augment=False)
+val_set = FluxDataset(flux_frame=metadata_loader.validation,
+                      batch_size=batch_size,
+                      do_shuffle=False,
+                      do_augment=False)
 
 resnet50 = models.resnet50(pretrained=True, progress=False)
 
@@ -208,8 +192,8 @@ modified_resnet = torch.nn.Sequential(resnet50,
 modified_resnet.to(cuda_device)
 
 train_model(modified_resnet,
-            train_dataset=trainset,
-            val_dataset=valset,
+            train_dataset=train_set,
+            val_dataset=val_set,
             max_epochs=480)
 
 print()
