@@ -1,6 +1,7 @@
 import json
 import os.path
 import re
+import warnings
 
 import imageio
 import pandas as pd
@@ -19,8 +20,6 @@ class Expedition:
     """
 
     def __init__(self, config_json_path):
-        # cores
-        self.core_number = 6
         # masks:
         #   key is a camera id
         #   value is an instance of Mask
@@ -42,7 +41,7 @@ class Expedition:
         self.anomaly_threshold = None
 
         # read config
-        self.set_configuration_using_json(config_json_path)
+        self.init_using_json(config_json_path)
 
         # dataFrames based on radiation measurement, photos and observations respectively
         self.df_radiation = pd.DataFrame()
@@ -52,41 +51,59 @@ class Expedition:
         # progress bar
         self.progress_bar = None
 
-    def set_configuration_using_json(self, config_json_path):
+    def init_using_json(self, config_json_path):
         # load config from json
         with open(config_json_path) as config_json_file:
             config = json.load(config_json_file)
 
-        # set resize flag
-        self.resize = config["resize"]
+        self.init_using_config_dict(config)
 
+    def init_using_config_dict(self, config):
+        for attribute in ("expedition_name",
+                          "radiation_dir",
+                          "observations_table",
+                          "photos_base_dir",
+                          "time_tolerance",
+                          "anomaly_threshold",
+                          "resize",
+                          ):
+            if attribute in config:
+                setattr(self, attribute, config[attribute])
+
+        self.time_tolerance = pd.to_timedelta(self.time_tolerance)
+
+        if 'mask_dir' in config:
+            self.load_masks(config["mask_dir"])
+
+    def load_masks(self, mask_dir):
         # load masks
-        for file in os.listdir(config["mask_dir"]):
+        for file in os.listdir(mask_dir):
             # check that mask matches "mask_ID[0-9]+\.png"
             if re.match(r"mask-id\d+\.png$", file):
-                file = os.path.join(config["mask_dir"], file)
+                file = os.path.join(mask_dir, file)
                 mask = Mask(file, self.resize)
                 self.masks[mask.camera_id] = mask
 
-        # save constants
-        self.expedition_name = config["expedition_name"]
-        self.radiation_dir = config["radiation_dir"]
-        self.observations_table = config["observations_table"]
-        self.photos_base_dir = config["photos_base_dir"]
-        self.time_tolerance = pd.to_timedelta(config["time_tolerance"])
-        self.anomaly_threshold = config["anomaly_threshold"]
-
     def init_events(self):
+        if self.photos_base_dir is None:
+            raise TypeError('self.photos_base_dir must be specified')
         self.df_events = photos_processing.init_events(self.photos_base_dir)
 
     def init_radiation(self):
+        if self.radiation_dir is None:
+            raise TypeError('self.radiation_dir must be specified')
         self.df_radiation = read_radiation.read_radiation_from_dir(self.radiation_dir)
 
     def init_observation(self):
+        if self.observations_table is None:
+            raise TypeError('self.observations_table must be specified')
+
         if self.observations_table.endswith("xlsx"):
             self.df_observations = pd.read_excel(self.observations_table)
         elif self.observations_table.endswith("csv"):
             self.df_observations = pd.read_csv(self.observations_table)
+        else:
+            raise ValueError(f'self.observations_table is {self.observations_table}. Extension must be xlsx or csv')
 
         self.df_observations.rename(columns={"Date_Time": "observation_datetime"}, inplace=True)
         self.df_observations["observation_datetime"] = pd.to_datetime(self.df_observations["observation_datetime"])
@@ -106,18 +123,7 @@ class Expedition:
 
         return: result of merge
         """
-        self.sort_events()
-        self.df_radiation.sort_values(by="radiation_datetime", inplace=True)
-
-        merged = pd.merge_asof(self.df_events, self.df_radiation,
-                               left_on="photo_datetime",
-                               right_on="radiation_datetime",
-                               direction="forward",
-                               tolerance=self.time_tolerance
-                               )
-        if inplace:
-            self.df_events = merged
-        return merged
+        return self._merge_something_to_events(target='radiation', inplace=inplace)
 
     def merge_observations_to_events(self, inplace=True):
         """
@@ -130,12 +136,30 @@ class Expedition:
 
         return: result of merge
         """
-        self.sort_events()
-        self.df_observations.sort_values(by="observation_datetime", inplace=True)
+        return self._merge_something_to_events(target='observation', inplace=inplace)
 
-        merged = pd.merge_asof(self.df_events, self.df_observations,
+    def _merge_something_to_events(self, target=None, inplace=True):
+        if not isinstance(self.time_tolerance, pd.Timedelta):
+            raise TypeError(f'self.time_tolerance must be pd.Timedelta but got {type(self.time_tolerance)}')
+        self.sort_events()
+        if target == 'radiation':
+            datetime_column = 'radiation_datetime'
+            attr = 'df_radiation'
+        elif target == 'observation':
+            datetime_column = 'observation_datetime'
+            attr = 'df_observations'
+        else:
+            raise ValueError('target must be one of ["radiation", "observation"]')
+
+        if datetime_column not in self.__getattribute__(attr).columns:
+            raise KeyError(f'{datetime_column} must be in self.{attr}.columns. Probably you forgot init that DataFrame')
+        if not self.__getattribute__(attr).shape[0]:
+            warnings.warn(f'self.{attr} has 0 rows')
+
+        self.__getattribute__(attr).sort_values(by=datetime_column, inplace=True)
+        merged = pd.merge_asof(self.df_events, self.__getattribute__(attr),
                                left_on="photo_datetime",
-                               right_on="observation_datetime",
+                               right_on=datetime_column,
                                direction="forward",
                                tolerance=self.time_tolerance
                                )
@@ -155,20 +179,14 @@ class Expedition:
         if a_datetime > b_datetime:
             a_datetime, b_datetime = b_datetime, a_datetime
 
-        if "photo_datetime" in self.df_events.columns:
-            selection = (self.df_events["photo_datetime"] > a_datetime) & (
-                    self.df_events["photo_datetime"] < b_datetime)
-            self.df_events = self.df_events[selection]
-
-        if "radiation_datetime" in self.df_radiation.columns:
-            selection = (self.df_radiation["radiation_datetime"] > a_datetime) & (
-                    self.df_radiation["radiation_datetime"] < b_datetime)
-            self.df_radiation = self.df_radiation[selection]
-
-        if "observation_datetime" in self.df_observations.columns:
-            selection = (self.df_observations["observation_datetime"] > a_datetime) & (
-                    self.df_observations["observation_datetime"] < b_datetime)
-            self.df_observations = self.df_observations[selection]
+        for df_name, datetime_column in (('df_events', 'photo_datetime'),
+                                         ('df_radiation', 'radiation_datetime'),
+                                         ('df_observations', 'observation_datetime')):
+            df = self.__getattribute__(df_name)
+            if datetime_column in df.columns:
+                selection = (df[datetime_column] > a_datetime) & \
+                            (df[datetime_column] < b_datetime)
+                setattr(self, df_name, df[selection])
 
     def get_image(self, row: pd.Series):
         camera_id = row["camera_id"]
