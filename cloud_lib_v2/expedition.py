@@ -4,6 +4,7 @@ import re
 import warnings
 
 import imageio
+import numpy as np
 import pandas as pd
 from numpy import ma
 from tqdm import tqdm
@@ -19,7 +20,7 @@ class Expedition:
         event is a taken photo
     """
 
-    def __init__(self, config_json_path):
+    def __init__(self):
         # masks:
         #   key is a camera id
         #   value is an instance of Mask
@@ -33,6 +34,8 @@ class Expedition:
         self.radiation_dir = None
         # path to observations table
         self.observations_table = None
+        # path to elevation table
+        self.elevation_table = None
         # path to photos
         self.photos_base_dir = None
         # time tolerance to apply merge
@@ -40,13 +43,11 @@ class Expedition:
         # autocorrelations below this threshold marks as anomalies
         self.anomaly_threshold = None
 
-        # read config
-        self.init_using_json(config_json_path)
-
         # dataFrames based on radiation measurement, photos and observations respectively
         self.df_radiation = pd.DataFrame()
         self.df_events = pd.DataFrame()
         self.df_observations = pd.DataFrame()
+        self.df_elevation = pd.DataFrame()
 
         # progress bar
         self.progress_bar = None
@@ -109,6 +110,16 @@ class Expedition:
         self.df_observations["observation_datetime"] = pd.to_datetime(self.df_observations["observation_datetime"])
         self.df_observations.sort_values(by="observation_datetime", inplace=True)
 
+    def init_elevation(self):
+        # todo uncomment when implemented
+        # if self.elevation_table is None:
+        #     raise TypeError('self.elevation_table must be specified')
+        warnings.warn(f'elevation Implemented as a stub, fills values randomly')
+        self.df_elevation['elevation_datetime'] = pd.date_range(start=self.df_events['photo_datetime'].min(),
+                                                                end=self.df_events['photo_datetime'].max(),
+                                                                freq='5S')
+        self.df_elevation['elevation'] = np.random.random_sample((self.df_elevation.shape[0])) * 180 - 90
+
     def sort_events(self):
         self.df_events.sort_values(by="photo_datetime", inplace=True)
 
@@ -138,6 +149,9 @@ class Expedition:
         """
         return self._merge_something_to_events(target='observation', inplace=inplace)
 
+    def merge_elevation_to_events(self, inplace=True):
+        return self._merge_something_to_events(target='elevation', inplace=inplace)
+
     def _merge_something_to_events(self, target=None, inplace=True):
         if not isinstance(self.time_tolerance, pd.Timedelta):
             raise TypeError(f'self.time_tolerance must be pd.Timedelta but got {type(self.time_tolerance)}')
@@ -148,8 +162,11 @@ class Expedition:
         elif target == 'observation':
             datetime_column = 'observation_datetime'
             attr = 'df_observations'
+        elif target == 'elevation':
+            datetime_column = 'elevation_datetime'
+            attr = 'df_elevation'
         else:
-            raise ValueError('target must be one of ["radiation", "observation"]')
+            raise ValueError('target must be one of ["radiation", "observation", "elevation"]')
 
         if datetime_column not in self.__getattribute__(attr).columns:
             raise KeyError(f'{datetime_column} must be in self.{attr}.columns. Probably you forgot init that DataFrame')
