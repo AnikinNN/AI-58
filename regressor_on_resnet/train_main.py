@@ -1,4 +1,8 @@
 import os
+import sys
+
+sys.path.append(os.path.join(sys.path[0], '..'))
+
 from threading import Thread
 from queue import Queue
 from tqdm import tqdm
@@ -32,7 +36,7 @@ def train_single_epoch(model: torch.nn.Module,
     pbar = tqdm(total=per_step_epoch, )
     pbar.set_description(desc='train')
     for batch_idx in range(per_step_epoch):
-        data_image, target = cuda_batches_queue.get(block=True)
+        data_image, target, elevation = cuda_batches_queue.get(block=True)
 
         if batch_idx == 0:
             logger.store_batch_as_image('train_batch', data_image,
@@ -42,7 +46,7 @@ def train_single_epoch(model: torch.nn.Module,
         target = Variable(target)
 
         optimizer.zero_grad()
-        data_out = model(data_image)
+        data_out = model(data_image, elevation)
         loss = loss_function(data_out, target)
         loss_values.append(loss.item())
 
@@ -70,8 +74,8 @@ def validate_single_epoch(model: torch.nn.Module,
     pbar = tqdm(total=per_step_epoch)
     pbar.set_description(desc='validation')
     for batch_idx in range(per_step_epoch):
-        data_image, target = cuda_batches_queue.get(block=True)
-        data_out = model(data_image)
+        data_image, target, elevation = cuda_batches_queue.get(block=True)
+        data_out = model(data_image, elevation)
 
         if batch_idx == 0:
             logger.store_batch_as_image('val_batch', data_image,
@@ -98,7 +102,7 @@ def train_model(model: torch.nn.Module,
     # start threads
     cpu_queue_length = 4
     cuda_queue_length = 4
-    preprocess_workers = [4, 15]
+    preprocess_workers = [6, 15]
 
     # contain train: [0] and validation: [1] queues
     cpu_queues = [Queue(maxsize=cpu_queue_length), Queue(maxsize=cpu_queue_length)]
@@ -121,8 +125,8 @@ def train_model(model: torch.nn.Module,
             thr = Thread(target=threaded_batches_feeder, args=(threads_killer, cpu_queues[i], datasets[i]))
             thr.start()
 
-    steps_per_epoch_train = 1
-    steps_per_epoch_valid = len(val_dataset) // batch_size + 1
+    steps_per_epoch_train = 1024
+    steps_per_epoch_valid = 512
 
     for epoch in range(max_epochs):
         print(f'Epoch {epoch + 1} / {max_epochs}')
@@ -162,7 +166,6 @@ metadata_loader = MetadataLoader('./AI-58-config.json',
                                  radiation_threshold=10,
                                  split=(0.6, 0.2, 0.2),
                                  store_path=logger.misc_dir)
-
 batch_size = 64
 train_set = FluxDataset(flux_frame=metadata_loader.train,
                         batch_size=batch_size,
@@ -171,24 +174,36 @@ train_set = FluxDataset(flux_frame=metadata_loader.train,
 
 val_set = FluxDataset(flux_frame=metadata_loader.validation,
                       batch_size=batch_size,
-                      do_shuffle=False,
+                      do_shuffle=True,
                       do_augment=False)
 
-resnet50 = models.resnet50(pretrained=True, progress=False)
 
-for param in resnet50.parameters():
-    param.requires_grad = False
+class ResnetRegressor(torch.nn.Module):
+    def __init__(self):
+        super(ResnetRegressor, self).__init__()
+        self.resnet = models.resnet50(pretrained=True, progress=False)
 
-resnet50.fc = torch.nn.Identity()
+        for param in self.resnet.parameters():
+            param.requires_grad = False
 
-modified_resnet = torch.nn.Sequential(resnet50,
-                                      nn.Linear(in_features=2048, out_features=512),
-                                      nn.ReLU(),
-                                      nn.Linear(in_features=512, out_features=128),
-                                      nn.ReLU(),
-                                      nn.Linear(in_features=128, out_features=1),
-                                      nn.ReLU())
+        self.resnet.fc = torch.nn.Identity()
 
+        # todo in_features=2049 replace by something like
+        # self.resnet.fc.output_shape + 1
+        self.fully_connected = torch.nn.Sequential(nn.Linear(in_features=2049, out_features=512),
+                                                   nn.ReLU(),
+                                                   nn.Linear(in_features=512, out_features=128),
+                                                   nn.ReLU(),
+                                                   nn.Linear(in_features=128, out_features=1),
+                                                   nn.ReLU())
+
+    def forward(self, image_batch, elevation_batch):
+        features = self.resnet(image_batch)
+        result = self.fully_connected(torch.cat((features, elevation_batch), dim=1))
+        return result
+
+
+modified_resnet = ResnetRegressor()
 modified_resnet.to(cuda_device)
 
 train_model(modified_resnet,

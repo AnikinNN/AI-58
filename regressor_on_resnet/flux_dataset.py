@@ -47,7 +47,7 @@ class FluxDataset:
             augmenters.Fliplr(0.5),
             augmenters.Flipud(0.5),
             # augmenters.Dropout([0.05, 0.2]),
-            augmenters.Affine(shear=(-16, 16), rotate=(-45, 45)),
+            augmenters.Affine(shear=(-5, 5), rotate=(-45, 45)),
             augmenters.MultiplyAndAddToBrightness(mul=(0.5, 1.5), add=(-30, 30))
         ], random_order=True)
 
@@ -68,11 +68,9 @@ class FluxDataset:
         image = self.imread(photo_path)
         mask = self.get_mask(photo_path)
         flux = self.flux_frame.iloc[index]['CM3up[W/m2]']
+        elevation = self.flux_frame.iloc[index]['elevation']
 
-        sample = {'image': image,
-                  'flux': flux,
-                  'mask': mask}
-        return sample
+        return image, mask, flux, elevation
 
     def get_mask(self, photo_path):
         # /dasio/AI58/snapshots/snapshots-2021-07-27/img-2021-07-27T17-37-21devID2.jpg
@@ -106,11 +104,7 @@ class FluxDataset:
                     self.init_count = 1
 
             for obj_id in self.objects_id_generator:
-                curr_data = self.get_data_by_id(obj_id)
-
-                image = curr_data['image']
-                mask = curr_data['mask']
-                flux = curr_data['flux']
+                image, mask, flux, elevation = self.get_data_by_id(obj_id)
 
                 image = self.resize(image)
 
@@ -128,12 +122,13 @@ class FluxDataset:
                 image = self.normalizer(image)
 
                 image = image * mask
+                elevation = np.sin(np.radians(elevation))
 
                 # Concurrent access by multiple threads to the lists below
                 with self.yield_lock:
                     if len(self.batch_y) < self.batch_size:
                         # resnet50 require input for 4-dimensional weight [64, 3, 7, 7]
-                        self.batch_x.append(image)
+                        self.batch_x.append((image, elevation))
                         self.batch_y.append(flux)
 
                     if len(self.batch_y) >= self.batch_size:

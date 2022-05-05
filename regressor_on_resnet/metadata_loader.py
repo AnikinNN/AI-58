@@ -24,11 +24,14 @@ class MetadataLoader:
             self.store_splits(store_path)
 
     def load_data(self, json):
-        expedition = Expedition(json)
+        expedition = Expedition()
+        expedition.init_using_json(json)
         expedition.init_events()
         expedition.init_radiation()
+        expedition.init_elevation()
 
         expedition.merge_radiation_to_events()
+        expedition.merge_elevation_to_events()
         df = expedition.df_events[expedition.df_events['CM3up[W/m2]'] > self.radiation_threshold]
         df.reset_index(drop=True, inplace=True)
         self.all_df = df
