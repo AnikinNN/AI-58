@@ -15,8 +15,19 @@ def read_single_radiation_file(path):
             if item != "none[V]":
                 columns.append(item)
 
+        first_line = input_file.readline().strip()
+        if first_line.count('.') > 0 and first_line.count(',') == 0:
+            decimal = '.'
+        elif first_line.count('.') == 0 and first_line.count(',') > 0:
+            decimal = ','
+        else:
+            raise NotImplementedError(
+                f'found {first_line.count(".")} dots and {first_line.count(",")}'
+                f' commas at first line with numerical data of file {path}.'
+                f' Don\'t know how to deal with it')
+
     # read data
-    result = pd.read_csv(path, skiprows=14, delimiter="\t", header=None)
+    result = pd.read_csv(path, skiprows=14, sep="\t", header=None, decimal=decimal)
     # delete empty columns
     result = result.drop(labels=[5, 6, 7, 9], axis='columns')
     # assign column names
