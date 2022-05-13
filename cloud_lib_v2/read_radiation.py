@@ -32,6 +32,12 @@ def read_single_radiation_file(path):
     result = result.drop(labels=[5, 6, 7, 9], axis='columns')
     # assign column names
     result.columns = columns
+
+    corrupted_selection = pd.to_datetime(result['data time'], format="%d/%m/%Y %H:%M:%S").isna()
+    if corrupted_selection.sum() > 0:
+        print(f'{path}, has {corrupted_selection.sum()} mistakes:\n',
+              result[corrupted_selection])
+
     return result
 
 

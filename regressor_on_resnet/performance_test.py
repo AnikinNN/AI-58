@@ -16,6 +16,8 @@ from regressor_on_resnet.flux_dataset_versions.flux_dataset_init import FluxData
 from regressor_on_resnet.flux_dataset_versions.flux_dataset_cv2 import FluxDataset as fd_cv2
 from regressor_on_resnet.flux_dataset_versions.flux_dataset_concat import FluxDataset as fd_concat
 from regressor_on_resnet.flux_dataset_versions.flux_dataset_mask import FluxDataset as fd_mask
+from regressor_on_resnet.flux_dataset import FluxDataset as fd_current
+
 
 from regressor_on_resnet.metadata_loader import MetadataLoader
 from regressor_on_resnet.threadsafe_iterator import ThreadKiller, threaded_batches_feeder
@@ -54,7 +56,7 @@ def test_performance(train_dataset,
     # start threads
     cpu_queue_length = 4
     cuda_queue_length = 4
-    preprocess_workers = [0, preprocess_workers_]
+    preprocess_workers = [preprocess_workers_, preprocess_workers_]
 
     # contain train: [0] and validation: [1] queues
     cpu_queues = [Queue(maxsize=cpu_queue_length), Queue(maxsize=cpu_queue_length)]
@@ -67,7 +69,7 @@ def test_performance(train_dataset,
 
     workers = []
 
-    for i in [1]:
+    for i in [0]:
         for _ in range(preprocess_workers[i]):
             thr = Thread(target=threaded_batches_feeder, args=(threads_killer, cpu_queues[i], datasets[i]))
             thr.start()
@@ -95,27 +97,28 @@ metadata_loader = MetadataLoader('./AI-58-config.json',
 
 batch_size = 64
 for FluxDataset, name in [
-    [fd_init, 'fd_init'],
-    [fd_cv2, 'fd_cv2'],
-    [fd_concat, 'fd_concat'],
-    [fd_mask, 'fd_mask'],
-    [fd_best, 'fd_best'],
+    # [fd_init, 'fd_init'],
+    # [fd_cv2, 'fd_cv2'],
+    # [fd_concat, 'fd_concat'],
+    # [fd_mask, 'fd_mask'],
+    # [fd_best, 'fd_best'],
+    [fd_current, 'fd_current'],
 ]:
     for proc_worker_num in list(range(1, 9)) + [10, 15, 20]:
     # for proc_worker_num in [5]:
-        trainset = FluxDataset(flux_frame=metadata_loader.train,
-                               batch_size=batch_size,
-                               do_shuffle=True,
-                               do_augment=True)
+        train_set = FluxDataset(flux_frame=metadata_loader.train,
+                                batch_size=batch_size,
+                                do_shuffle=True,
+                                do_augment=True)
 
-        valset = FluxDataset(flux_frame=metadata_loader.validation,
-                             batch_size=batch_size,
-                             do_shuffle=False,
-                             do_augment=False)
+        val_set = FluxDataset(flux_frame=metadata_loader.validation,
+                              batch_size=batch_size,
+                              do_shuffle=False,
+                              do_augment=False)
 
         print(f'{name}, {proc_worker_num}')
-        test_performance(train_dataset=trainset,
-                         val_dataset=valset,
+        test_performance(train_dataset=train_set,
+                         val_dataset=val_set,
                          preprocess_workers_=proc_worker_num)
 
 print()

@@ -1,0 +1,8 @@
+{
+  "expedition_name": "AI45",
+  "mask_dir": "/dasio/AI45/masks/",
+  "radiation_dir": "/dasio/AI45/CNR1_data/RESULT/",
+  "photos_base_dir": "/dasio/AI45/snapshots/",
+  "resize": true,
+  "time_tolerance": "10sec"
+}

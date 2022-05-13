@@ -6,6 +6,7 @@ import warnings
 import imageio
 import numpy as np
 import pandas as pd
+from hypothesis.extra.pandas import columns
 from numpy import ma
 from tqdm import tqdm
 
@@ -63,6 +64,7 @@ class Expedition:
         for attribute in ("expedition_name",
                           "radiation_dir",
                           "observations_table",
+                          "elevation_table",
                           "photos_base_dir",
                           "time_tolerance",
                           "anomaly_threshold",
@@ -111,14 +113,12 @@ class Expedition:
         self.df_observations.sort_values(by="observation_datetime", inplace=True)
 
     def init_elevation(self):
-        # todo uncomment when implemented
-        # if self.elevation_table is None:
-        #     raise TypeError('self.elevation_table must be specified')
-        warnings.warn(f'elevation Implemented as a stub, fills values randomly')
-        self.df_elevation['elevation_datetime'] = pd.date_range(start=self.df_events['photo_datetime'].min(),
-                                                                end=self.df_events['photo_datetime'].max(),
-                                                                freq='5S')
-        self.df_elevation['elevation'] = np.random.random_sample((self.df_elevation.shape[0])) * 180 - 90
+        if self.elevation_table is None:
+            raise TypeError('self.elevation_table must be specified')
+        self.df_elevation = pd.read_csv(self.elevation_table, sep=';')
+        self.df_elevation['elevation_datetime'] = pd.to_datetime(self.df_elevation['datetime_UTC'],
+                                                                 format='%Y-%m-%dT%H-%M-%S.%f')
+        self.df_elevation.drop(columns=['datetime_UTC'], inplace=True)
 
     def sort_events(self):
         self.df_events.sort_values(by="photo_datetime", inplace=True)
@@ -177,7 +177,7 @@ class Expedition:
         merged = pd.merge_asof(self.df_events, self.__getattribute__(attr),
                                left_on="photo_datetime",
                                right_on=datetime_column,
-                               direction="forward",
+                               direction="nearest",
                                tolerance=self.time_tolerance
                                )
         if inplace:

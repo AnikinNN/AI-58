@@ -1,0 +1,10 @@
+{
+  "expedition_name": "AMK71",
+  "mask_dir": "/dasio/AMK71/masks/",
+  "radiation_dir": "/dasio/AMK71/CNR1_data/RESULT/",
+  "observations_table": "E:\\AI-58-files\\clouds_observations\\AI58-observations.csv",
+  "photos_base_dir": "/dasio/AMK71/snapshots/",
+  "resize": true,
+  "time_tolerance": "10sec",
+  "anomaly_threshold": 0.8
+}

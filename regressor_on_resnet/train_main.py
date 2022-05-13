@@ -162,7 +162,8 @@ def train_model(model: torch.nn.Module,
 cuda_device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 cpu_device = 'cpu'
 
-metadata_loader = MetadataLoader('./AI-58-config.json',
+metadata_loader = MetadataLoader(('/app/scripts/anikin/AI-58/cloud_applications_v2/find_mistakes/AI-58-config.json',
+                                  '/app/scripts/anikin/AI-58/cloud_applications_v2/find_mistakes/AMK-79-config.json'),
                                  radiation_threshold=10,
                                  split=(0.6, 0.2, 0.2),
                                  store_path=logger.misc_dir)

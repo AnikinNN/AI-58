@@ -7,7 +7,7 @@ from cloud_lib_v2.expedition import Expedition
 
 
 class MetadataLoader:
-    def __init__(self, json, radiation_threshold=10, split=(0.80, 0.10, 0.10), store_path=None):
+    def __init__(self, configs, radiation_threshold=10, split=(0.80, 0.10, 0.10), store_path=None):
         self.all_df = pd.DataFrame()
         self.train = pd.DataFrame()
         self.validation = pd.DataFrame()
@@ -16,16 +16,20 @@ class MetadataLoader:
         self.radiation_threshold = radiation_threshold
 
         # now this implemented using cloud_lib_v2
-        # todo reimplement for many expeditions
-        self.load_data(json)
+        for config in configs:
+            self.load_data(config)
 
+        self.all_df.sort_values(by="photo_datetime", inplace=True)
         self.split(*split)
         if store_path is not None:
             self.store_splits(store_path)
 
-    def load_data(self, json):
+    def load_data(self, config):
         expedition = Expedition()
-        expedition.init_using_json(json)
+        if isinstance(config, dict):
+            expedition.init_using_config_dict()
+        else:
+            expedition.init_using_json(config)
         expedition.init_events()
         expedition.init_radiation()
         expedition.init_elevation()
@@ -33,8 +37,12 @@ class MetadataLoader:
         expedition.merge_radiation_to_events()
         expedition.merge_elevation_to_events()
         df = expedition.df_events[expedition.df_events['CM3up[W/m2]'] > self.radiation_threshold]
+        df = df.dropna(subset=['sun_altitude'])
         df.reset_index(drop=True, inplace=True)
-        self.all_df = df
+        self.extend_all(df)
+
+    def extend_all(self, appendix):
+        self.all_df = pd.concat((self.all_df, appendix), axis=0, ignore_index=True)
 
     def split(self, train_size, validation_size, test_size):
         assert (train_size + validation_size + test_size) <= 1, 'sum of train, validation, test must be less than 1'

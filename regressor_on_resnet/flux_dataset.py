@@ -68,7 +68,7 @@ class FluxDataset:
         image = self.imread(photo_path)
         mask = self.get_mask(photo_path)
         flux = self.flux_frame.iloc[index]['CM3up[W/m2]']
-        elevation = self.flux_frame.iloc[index]['elevation']
+        elevation = self.flux_frame.iloc[index]['sun_altitude']
 
         return image, mask, flux, elevation
 
@@ -114,6 +114,8 @@ class FluxDataset:
                                                                           segmentation_maps=segmentation_maps)
                     mask = segmentation_maps.draw()[0]
                     mask = np.where(mask > 0, 1, 0).transpose(2, 0, 1)
+                    # add noise and limit if necessary
+                    elevation = np.clip(np.random.normal(elevation, 1), -90, 90)
                 else:
                     pass
 

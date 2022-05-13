@@ -48,7 +48,7 @@ def extract_time(file_name):
     """
     result = re.findall(r"\d{4}-\d{2}-\d{2}", file_name)[0]
     result += " "
-    result += re.findall(r"T\d{2}-\d{2}-\d{2}", file_name)[0][1:].replace("-", ":")
+    result += re.findall(r"[tT]\d{2}-\d{2}-\d{2}", file_name)[0][1:].replace("-", ":")
     return result
 
 
