@@ -4,8 +4,8 @@ from torch.nn import MSELoss
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 from tqdm import tqdm
-from queue import Queue
-from threading import Thread
+from queue import Queue, Empty
+from threading import Thread, active_count
 
 from regressor_on_resnet.flux_dataset import FluxDataset
 from regressor_on_resnet.nn_logging import Logger
@@ -99,7 +99,8 @@ def train_model(model: torch.nn.Module,
     # start threads
     cpu_queue_length = 3
     cuda_queue_length = 3
-    preprocess_workers = [6, 15]
+    preprocess_worker_numbers = [6, 15]
+    cuda_feeder_numbers = [1, 1]
 
     # contain train: [0] and validation: [1] queues
     cpu_queues = [Queue(maxsize=cpu_queue_length), Queue(maxsize=cpu_queue_length)]
@@ -110,50 +111,69 @@ def train_model(model: torch.nn.Module,
     threads_killer = ThreadKiller()
     threads_killer.set_to_kill(False)
 
-    for i in range(2):
-        for _ in range(1):
-            cuda_thread = Thread(target=threaded_cuda_feeder,
-                                 args=(threads_killer,
-                                       cuda_queues[i],
-                                       cpu_queues[i],
-                                       cuda_device))
-            cuda_thread.start()
-        for _ in range(preprocess_workers[i]):
-            thr = Thread(target=threaded_batches_feeder, args=(threads_killer, cpu_queues[i], datasets[i]))
-            thr.start()
+    # thread storage to watch after their closing
+    cuda_feeders = []
+    preprocess_workers = []
 
-    steps_per_epoch_train = 1024
-    steps_per_epoch_valid = 512
 
-    for epoch in range(max_epochs):
-        print(f'Epoch {epoch + 1} / {max_epochs}')
-        train_loss = train_single_epoch(model,
-                                        optimizer,
-                                        loss_function,
-                                        cuda_queues[0],
-                                        steps_per_epoch_train,
-                                        current_epoch=epoch,
-                                        logger=logger)
-        logger.tb_writer.add_scalar('train_loss_per_epoch', train_loss, epoch)
+    try:
+        for i in range(2):
+            for _ in range(cuda_feeder_numbers[i]):
+                cuda_thread = Thread(target=threaded_cuda_feeder,
+                                     args=(threads_killer,
+                                           cuda_queues[i],
+                                           cpu_queues[i],
+                                           cuda_device))
+                cuda_thread.start()
+                cuda_feeders.append(cuda_thread)
+            for _ in range(preprocess_worker_numbers[i]):
+                thr = Thread(target=threaded_batches_feeder, args=(threads_killer, cpu_queues[i], datasets[i]))
+                thr.start()
+                preprocess_workers.append(thr)
 
-        val_loss = validate_single_epoch(model,
-                                         loss_function,
-                                         cuda_queues[1],
-                                         steps_per_epoch_valid,
-                                         current_epoch=epoch,
-                                         logger=logger)
-        logger.tb_writer.add_scalar('val_loss', val_loss, epoch)
+        steps_per_epoch_train = 1024
+        steps_per_epoch_valid = 512
 
-        print(f'Validation loss: {val_loss}')
+        for epoch in range(max_epochs):
+            print(f'Epoch {epoch + 1} / {max_epochs}')
+            train_loss = train_single_epoch(model,
+                                            optimizer,
+                                            loss_function,
+                                            cuda_queues[0],
+                                            steps_per_epoch_train,
+                                            current_epoch=epoch,
+                                            logger=logger)
+            logger.tb_writer.add_scalar('train_loss_per_epoch', train_loss, epoch)
 
-        lr_scheduler.step()
+            val_loss = validate_single_epoch(model,
+                                             loss_function,
+                                             cuda_queues[1],
+                                             steps_per_epoch_valid,
+                                             current_epoch=epoch,
+                                             logger=logger)
+            logger.tb_writer.add_scalar('val_loss', val_loss, epoch)
 
-        torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
+            print(f'Validation loss: {val_loss}')
+
+            lr_scheduler.step()
+
+            torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
+    except KeyboardInterrupt:
+        pass
 
     threads_killer.set_to_kill(True)
 
-    # clean queues
-    # todo this is not good implementation copy from performance_test
-    for queue_list in [cpu_queues, cuda_queues]:
-        for i in queue_list:
-            i.queue.clear()
+    # clean cuda_queues to stop cuda_feeder
+    while sum(map(lambda x: int(x.is_alive()), cuda_feeders)):
+        for i in cuda_queues:
+            while not i.empty():
+                i.get()
+
+    # clean cpu_queues to stop preprocess_workers
+    while sum(map(lambda x: int(x.is_alive()), preprocess_workers)):
+        for queue_list in [cpu_queues, cuda_queues]:
+            for i in queue_list:
+                while not i.empty():
+                    i.get()
+
+    print('train_model: done')
