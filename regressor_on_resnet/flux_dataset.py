@@ -97,6 +97,7 @@ class FluxDataset:
     def __iter__(self):
         while True:
             with self.lock:
+                # todo implement initial shuffle without using self.init_count
                 if self.init_count == 0:
                     self.shuffle_data()
                     # clean batch_data

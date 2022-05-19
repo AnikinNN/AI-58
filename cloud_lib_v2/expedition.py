@@ -4,9 +4,7 @@ import re
 import warnings
 
 import imageio
-import numpy as np
 import pandas as pd
-from hypothesis.extra.pandas import columns
 from numpy import ma
 from tqdm import tqdm
 

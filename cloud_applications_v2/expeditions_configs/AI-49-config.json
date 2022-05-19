@@ -1,0 +1,10 @@
+{
+  "expedition_name": "AI49",
+  "mask_dir": "/dasio/AI49/masks/",
+  "radiation_dir": "/dasio/AI49/CNR1_data/RESULT/",
+  "photos_base_dir": "/dasio/AI49/snapshots/",
+  "resize": true,
+  "time_tolerance": "10sec",
+  "elevation_table": "/dasio/AI49/concurrentdata/concurrent_data.csv",
+  "anomaly_threshold": 0.8
+}

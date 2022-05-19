@@ -1,0 +1,10 @@
+{
+  "expedition_name": "ABP42",
+  "mask_dir": "/dasio/ABP42/masks/",
+  "radiation_dir": "/dasio/ABP42/CNR1_data/RESULT/",
+  "photos_base_dir": "/dasio/ABP42/snapshots/",
+  "resize": true,
+  "time_tolerance": "10sec",
+  "elevation_table": "/dasio/ABP42/concurrentdata/concurrent_data.csv",
+  "anomaly_threshold": 0.8
+}

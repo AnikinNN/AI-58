@@ -1,0 +1,10 @@
+{
+  "expedition_name": "AMK79",
+  "mask_dir": "/dasio/AMK79/masks/",
+  "radiation_dir": "/dasio/AMK79/CNR1_data/RESULT/",
+  "photos_base_dir": "/dasio/AMK79/snapshots/",
+  "resize": true,
+  "time_tolerance": "10sec",
+  "elevation_table": "/dasio/AMK79/concurrentdata/concurrent_data.csv",
+  "anomaly_threshold": 0.8
+}

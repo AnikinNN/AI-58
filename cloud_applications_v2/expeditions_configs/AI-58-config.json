@@ -1,0 +1,10 @@
+{
+  "expedition_name": "AI58",
+  "mask_dir": "/dasio/AI58/masks/",
+  "radiation_dir": "/dasio/AI58/CNR1_data/RESULT/",
+  "photos_base_dir": "/dasio/AI58/snapshots/",
+  "resize": true,
+  "time_tolerance": "10sec",
+  "elevation_table": "/dasio/AI58/concurrentdata/concurrent_data.csv",
+  "anomaly_threshold": 0.8
+}

@@ -11,11 +11,6 @@ import numpy as np
 from tqdm import tqdm, trange
 import torch
 
-from regressor_on_resnet.flux_dataset_versions.flux_dataset_best import FluxDataset as fd_best
-from regressor_on_resnet.flux_dataset_versions.flux_dataset_init import FluxDataset as fd_init
-from regressor_on_resnet.flux_dataset_versions.flux_dataset_cv2 import FluxDataset as fd_cv2
-from regressor_on_resnet.flux_dataset_versions.flux_dataset_concat import FluxDataset as fd_concat
-from regressor_on_resnet.flux_dataset_versions.flux_dataset_mask import FluxDataset as fd_mask
 from regressor_on_resnet.flux_dataset import FluxDataset as fd_current
 
 

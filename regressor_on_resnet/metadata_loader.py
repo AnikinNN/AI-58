@@ -27,7 +27,7 @@ class MetadataLoader:
     def load_data(self, config):
         expedition = Expedition()
         if isinstance(config, dict):
-            expedition.init_using_config_dict()
+            expedition.init_using_config_dict(config)
         else:
             expedition.init_using_json(config)
         expedition.init_events()
