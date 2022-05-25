@@ -13,7 +13,6 @@ from regressor_on_resnet.train_common import train_model
 logger = Logger()
 
 cuda_device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
-cpu_device = 'cpu'
 
 metadata_loader = MetadataLoader(('./../cloud_applications_v2/expeditions_configs/AI-58-config.json',
                                   './../cloud_applications_v2/expeditions_configs/AMK-79-config.json',
@@ -42,6 +41,6 @@ train_model(modified_resnet,
             val_dataset=val_set,
             logger=logger,
             cuda_device=cuda_device,
-            max_epochs=480)
+            max_epochs=250)
 
 print()

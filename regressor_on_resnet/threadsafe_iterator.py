@@ -57,3 +57,6 @@ def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device
         cuda_batches_queue.put((img, flux, elevation), block=True)
     print('cuda_feeder_killed')
     return
+
+# class BathFactory:
+#     def __init__(self, cpu_queue_length, cuda_queue_length):

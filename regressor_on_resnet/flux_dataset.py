@@ -48,7 +48,7 @@ class FluxDataset:
             augmenters.Flipud(0.5),
             # augmenters.Dropout([0.05, 0.2]),
             augmenters.Affine(shear=(-5, 5), rotate=(-45, 45)),
-            augmenters.MultiplyAndAddToBrightness(mul=(0.5, 1.5), add=(-30, 30))
+            augmenters.MultiplyAndAddToBrightness(mul=(0.85, 1.15), add=(-20, 20))
         ], random_order=True)
 
         self.output_size = (512, 512)

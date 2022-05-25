@@ -14,10 +14,9 @@ from regressor_on_resnet.pretrained_loader import PretrainedLoader
 
 logger = Logger()
 
-base_run_number = 55
+base_run_number = 114
 
 cuda_device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
-cpu_device = 'cpu'
 
 batch_size = 64
 
@@ -43,6 +42,7 @@ train_model(modified_resnet,
             val_dataset=val_set,
             logger=logger,
             cuda_device=cuda_device,
-            max_epochs=480)
+            max_epochs=256,
+            use_warmup=True)
 
 print()
