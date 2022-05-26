@@ -1,16 +1,17 @@
+import pickle
+
+import pandas as pd
 import torch
 from torch.autograd import Variable
 from torch.nn import MSELoss
-# from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 from tqdm import tqdm
 from queue import Queue, Empty
-from threading import Thread, active_count
 
 from regressor_on_resnet.flux_dataset import FluxDataset
 from regressor_on_resnet.nn_logging import Logger
 from regressor_on_resnet.sgdr_restarts_warmup import CosineAnnealingWarmupRestarts
-from regressor_on_resnet.threadsafe_iterator import ThreadKiller, threaded_batches_feeder, threaded_cuda_feeder
+from regressor_on_resnet.batch_factory import BatchFactory
 
 import numpy as np
 import os
@@ -33,7 +34,7 @@ def train_single_epoch(model: torch.nn.Module,
     pbar = tqdm(total=per_step_epoch, )
     pbar.set_description(desc='train')
     for batch_idx in range(per_step_epoch):
-        data_image, target, elevation = cuda_batches_queue.get(block=True)
+        data_image, target, elevation, _ = cuda_batches_queue.get(block=True)
 
         if batch_idx == 0:
             logger.store_batch_as_image('train_batch', data_image,
@@ -74,7 +75,7 @@ def validate_single_epoch(model: torch.nn.Module,
     pbar = tqdm(total=per_step_epoch)
     pbar.set_description(desc='validation')
     for batch_idx in range(per_step_epoch):
-        data_image, target, elevation = cuda_batches_queue.get(block=True)
+        data_image, target, elevation, _ = cuda_batches_queue.get(block=True)
 
         with torch.no_grad():
             data_out = model(data_image, elevation)
@@ -93,9 +94,47 @@ def validate_single_epoch(model: torch.nn.Module,
     return np.mean(loss_values)
 
 
+def calculate_hard_mining_weights(model: torch.nn.Module,
+                                  train_dataset: FluxDataset,
+                                  hard_mining_dataset: FluxDataset,
+                                  cuda_batches_queue: Queue,
+                                  ):
+    model.eval()
+
+    batch_number = len(hard_mining_dataset) // hard_mining_dataset.batch_size + 1
+    pbar = tqdm(total=batch_number)
+    pbar.set_description(desc='hard_mining')
+    for batch_idx in range(batch_number):
+        data_image, target, elevation, row_ids = cuda_batches_queue.get(block=True)
+
+        with torch.no_grad():
+            data_out = model(data_image, elevation)
+            error = torch.abs(target - data_out).cpu().detach().numpy().flatten()
+
+        error = error / error.mean()
+        updater_df = pd.DataFrame({'hard_mining_weight': error.tolist()})
+        updater_df.set_index(pd.Index(row_ids), inplace=True)
+        train_dataset.flux_frame.update(updater_df)
+
+        # np.save('error.npy', error)
+        # with open('train.pickle', 'wb') as file:
+        #     pickle.dump(train_dataset.flux_frame, file)
+        # with open('row_ids.pickle', 'wb') as file:
+        #     pickle.dump(row_ids, file)
+
+        # raise KeyboardInterrupt
+
+        pbar.update()
+        pbar.set_postfix({'cuda_queue_len': cuda_batches_queue.qsize()})
+    pbar.close()
+
+    return
+
+
 def train_model(model: torch.nn.Module,
                 train_dataset: FluxDataset,
                 val_dataset: FluxDataset,
+                hard_mining_dataset: FluxDataset,
                 logger: Logger,
                 cuda_device,
                 max_epochs=480,
@@ -117,46 +156,20 @@ def train_model(model: torch.nn.Module,
                                                  gamma=0.8,
                                                  last_epoch=-1)
 
-    # start threads
-    cpu_queue_length = 3
-    cuda_queue_length = 3
-    preprocess_worker_numbers = [6, 15]
-    cuda_feeder_numbers = [1, 1]
+    train_batch_factory = BatchFactory(train_dataset, cuda_device, preprocess_worker_number=6)
+    validation_batch_factory = BatchFactory(val_dataset, cuda_device, preprocess_worker_number=15)
+    hard_mining_batch_factory = BatchFactory(hard_mining_dataset, cuda_device, preprocess_worker_number=15)
 
-    # contain train: [0] and validation: [1] queues
-    cpu_queues = [Queue(maxsize=cpu_queue_length), Queue(maxsize=cpu_queue_length)]
-    cuda_queues = [Queue(maxsize=cuda_queue_length), Queue(maxsize=cuda_queue_length)]
-    datasets = [train_dataset, val_dataset]
-
-    # one killer for all threads
-    threads_killer = ThreadKiller()
-    threads_killer.set_to_kill(False)
-
-    # thread storage to watch after their closing
-    cuda_feeders = []
-    preprocess_workers = []
+    best_val_loss = float('Inf')
+    best_val_epoch = -1
 
     try:
-        for i in range(2):
-            for _ in range(cuda_feeder_numbers[i]):
-                cuda_thread = Thread(target=threaded_cuda_feeder,
-                                     args=(threads_killer,
-                                           cuda_queues[i],
-                                           cpu_queues[i],
-                                           cuda_device))
-                cuda_thread.start()
-                cuda_feeders.append(cuda_thread)
-            for _ in range(preprocess_worker_numbers[i]):
-                thr = Thread(target=threaded_batches_feeder, args=(threads_killer, cpu_queues[i], datasets[i]))
-                thr.start()
-                preprocess_workers.append(thr)
-
         for epoch in range(max_epochs):
             print(f'Epoch {epoch} / {max_epochs}')
             train_loss = train_single_epoch(model,
                                             optimizer,
                                             weighted_mse,
-                                            cuda_queues[0],
+                                            train_batch_factory.cuda_queue,
                                             steps_per_epoch_train,
                                             current_epoch=epoch,
                                             logger=logger,
@@ -165,31 +178,38 @@ def train_model(model: torch.nn.Module,
 
             val_loss = validate_single_epoch(model,
                                              mse,
-                                             cuda_queues[1],
+                                             validation_batch_factory.cuda_queue,
                                              steps_per_epoch_valid,
                                              current_epoch=epoch,
                                              logger=logger)
             logger.tb_writer.add_scalar('val_loss', val_loss, epoch)
-
             print(f'Validation loss: {val_loss}')
 
-            torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
+            if best_val_loss > val_loss:
+                # save new model
+                torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
+                # delete old model
+                old_model_path = os.path.join(logger.misc_dir, f'model_ep{best_val_epoch}.pt')
+                if os.path.exists(old_model_path):
+                    os.remove(old_model_path)
+                best_val_loss = val_loss
+                best_val_epoch = epoch
+
+            # every single pass of whole dataset
+            if epoch % int(len(train_dataset) / train_dataset.batch_size / steps_per_epoch_train + 1) == 0:
+            # if True:
+                calculate_hard_mining_weights(model,
+                                              train_dataset,
+                                              hard_mining_dataset,
+                                              hard_mining_batch_factory.cuda_queue)
+
     except KeyboardInterrupt:
         pass
 
-    threads_killer.set_to_kill(True)
-
-    # clean cuda_queues to stop cuda_feeder
-    while sum(map(lambda x: int(x.is_alive()), cuda_feeders)):
-        for i in cuda_queues:
-            while not i.empty():
-                i.get()
-
-    # clean cpu_queues to stop preprocess_workers
-    while sum(map(lambda x: int(x.is_alive()), preprocess_workers)):
-        for queue_list in [cpu_queues, cuda_queues]:
-            for i in queue_list:
-                while not i.empty():
-                    i.get()
+    for i in (
+            train_batch_factory,
+            hard_mining_batch_factory,
+            validation_batch_factory,):
+        i.stop()
 
     print('train_model: done')

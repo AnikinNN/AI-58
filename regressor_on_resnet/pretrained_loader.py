@@ -15,14 +15,17 @@ class PretrainedLoader:
         self.model = None
 
     def init_using_paths(self, model_path, dataset_path, store_path=None):
-        for piece in ('train', 'validation', 'test'):
-            df = pd.read_csv(os.path.join(dataset_path, f'subset_{piece}.csv'), index_col=0)
-            self.__setattr__(piece, df)
+        self.load_dataset(dataset_path)
 
         self.model = torch.load(model_path)
 
         if store_path is not None:
             self.copy_data(model_path, dataset_path, store_path)
+
+    def load_dataset(self, dataset_path):
+        for piece in ('train', 'validation', 'test'):
+            df = pd.read_csv(os.path.join(dataset_path, f'subset_{piece}.csv'), index_col=0)
+            self.__setattr__(piece, df)
 
     def copy_data(self, model_path, dataset_path, store_path):
         files = zip(self._get_subset_paths(dataset_path) + [model_path],

@@ -33,12 +33,18 @@ val_set = FluxDataset(flux_frame=metadata_loader.validation,
                       do_shuffle=True,
                       do_augment=False)
 
+hard_mining_train_set = FluxDataset(flux_frame=metadata_loader.train,
+                                    batch_size=batch_size,
+                                    do_shuffle=False,
+                                    do_augment=False)
+
 modified_resnet = ResnetRegressor()
 modified_resnet.to(cuda_device)
 
 train_model(modified_resnet,
             train_dataset=train_set,
             val_dataset=val_set,
+            hard_mining_dataset = hard_mining_train_set,
             logger=logger,
             cuda_device=cuda_device,
             max_epochs=250)

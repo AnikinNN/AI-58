@@ -37,7 +37,7 @@ class FluxDataset:
         self.do_augment = do_augment
         self.batch_size = batch_size
 
-        self.objects_id_generator = ThreadsafeIterator(get_object_index(self.flux_frame.shape[0]))
+        self.objects_iloc_generator = ThreadsafeIterator(get_object_index(self.flux_frame.shape[0]))
 
         self.lock = threading.Lock()  # mutex for input path
         self.yield_lock = threading.Lock()  # mutex for generator yielding of batch
@@ -69,8 +69,9 @@ class FluxDataset:
         mask = self.get_mask(photo_path)
         flux = self.flux_frame.iloc[index]['CM3up[W/m2]']
         elevation = self.flux_frame.iloc[index]['sun_altitude']
+        row_id = self.flux_frame.iloc[index].name
 
-        return image, mask, flux, elevation
+        return image, mask, flux, elevation, row_id
 
     def get_mask(self, photo_path):
         # /dasio/AI58/snapshots/snapshots-2021-07-27/img-2021-07-27T17-37-21devID2.jpg
@@ -104,8 +105,8 @@ class FluxDataset:
                     self.clean_batch()
                     self.init_count = 1
 
-            for obj_id in self.objects_id_generator:
-                image, mask, flux, elevation = self.get_data_by_id(obj_id)
+            for obj_iloc in self.objects_iloc_generator:
+                image, mask, flux, elevation, row_id = self.get_data_by_id(obj_iloc)
 
                 image = self.resize(image)
 
@@ -131,7 +132,7 @@ class FluxDataset:
                 with self.yield_lock:
                     if len(self.batch_y) < self.batch_size:
                         # resnet50 require input for 4-dimensional weight [64, 3, 7, 7]
-                        self.batch_x.append((image, elevation))
+                        self.batch_x.append((image, elevation, row_id))
                         self.batch_y.append(flux)
 
                     if len(self.batch_y) >= self.batch_size:

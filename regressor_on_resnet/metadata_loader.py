@@ -20,6 +20,7 @@ class MetadataLoader:
             self.load_data(config)
 
         self.all_df.sort_values(by="photo_datetime", inplace=True)
+        self.all_df['hard_mining_weight'] = 1.0
         self.split(*split)
         if store_path is not None:
             self.store_splits(store_path)
