@@ -8,7 +8,7 @@ from regressor_on_resnet.mish import Mish
 class ResnetRegressor(torch.nn.Module):
     def __init__(self):
         super(ResnetRegressor, self).__init__()
-        self.resnet = models.resnet50(pretrained=True, progress=False)
+        self.resnet = models.resnet152(pretrained=True, progress=False)
         self.set_train_convolutional_part(False)
         self.resnet.fc = torch.nn.Identity()
 

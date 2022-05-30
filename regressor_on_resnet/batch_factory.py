@@ -1,6 +1,7 @@
 import threading
 from queue import Queue
 
+import numpy as np
 import torch
 from torch.autograd import Variable
 
@@ -36,11 +37,12 @@ def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device
         img = torch.stack(tuple(i[0] for i in x))
         elevation = torch.tensor(tuple([i[1]] for i in x))
         row_ids = tuple(i[2] for i in x)
+        hard_mining_weights = np.array(tuple(i[3] for i in x))
 
         flux = Variable(flux.float()).to(cuda_device)
         img = Variable(img.float()).to(cuda_device)
         elevation = Variable(elevation.float()).to(cuda_device)
-        cuda_batches_queue.put((img, flux, elevation, row_ids), block=True)
+        cuda_batches_queue.put((img, flux, elevation, row_ids, hard_mining_weights), block=True)
     print('cuda_feeder_killed')
     return
 

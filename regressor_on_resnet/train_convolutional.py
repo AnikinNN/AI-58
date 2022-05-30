@@ -14,7 +14,7 @@ from regressor_on_resnet.pretrained_loader import PretrainedLoader
 
 logger = Logger()
 
-base_run_number = 114
+base_run_number = 115
 
 cuda_device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
@@ -33,6 +33,11 @@ val_set = FluxDataset(flux_frame=pretrained_loader.validation,
                       do_shuffle=True,
                       do_augment=False)
 
+hard_mining_train_set = FluxDataset(flux_frame=pretrained_loader.train,
+                                    batch_size=batch_size,
+                                    do_shuffle=False,
+                                    do_augment=False)
+
 modified_resnet = pretrained_loader.model
 modified_resnet.set_train_convolutional_part(True)
 modified_resnet.to(cuda_device)
@@ -40,6 +45,7 @@ modified_resnet.to(cuda_device)
 train_model(modified_resnet,
             train_dataset=train_set,
             val_dataset=val_set,
+            hard_mining_dataset=hard_mining_train_set,
             logger=logger,
             cuda_device=cuda_device,
             max_epochs=256,

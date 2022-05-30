@@ -25,14 +25,15 @@ class WeightedMse:
         self.weights = weights
         self.bounds = bounds
 
-    def __call__(self, predicted, target):
-        return self.weighted_mse_loss(predicted, target)
+    def __call__(self, predicted, target, hard_mining_weights):
+        return self.weighted_mse_loss(predicted, target, hard_mining_weights)
 
-    def weighted_mse_loss(self, predicted: torch.Tensor, target: torch.Tensor):
+    def weighted_mse_loss(self, predicted: torch.Tensor, target: torch.Tensor, hard_mining_weights: np.ndarray):
         target_ndarray = target.cpu().detach().numpy().flatten()
         weights_on_input = self.get_weights_on_input(target_ndarray)
         weights_on_input = torch.tensor(weights_on_input.reshape((-1, 1))).to(predicted.get_device())
-        return (torch.square(predicted - target) * weights_on_input).mean()
+        hard_mining_weights = torch.tensor(hard_mining_weights.reshape((-1, 1))).to(predicted.get_device())
+        return (torch.square(predicted - target) * weights_on_input * hard_mining_weights).mean()
 
     def get_weights_on_input(self, target):
         weight_index = np.searchsorted(self.bounds, target, side='right')

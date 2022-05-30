@@ -34,7 +34,7 @@ def train_single_epoch(model: torch.nn.Module,
     pbar = tqdm(total=per_step_epoch, )
     pbar.set_description(desc='train')
     for batch_idx in range(per_step_epoch):
-        data_image, target, elevation, _ = cuda_batches_queue.get(block=True)
+        data_image, target, elevation, _, hard_mining_weights = cuda_batches_queue.get(block=True)
 
         if batch_idx == 0:
             logger.store_batch_as_image('train_batch', data_image,
@@ -45,7 +45,7 @@ def train_single_epoch(model: torch.nn.Module,
 
         optimizer.zero_grad()
         data_out = model(data_image, elevation)
-        loss = loss_function(data_out, target)
+        loss = loss_function(data_out, target, hard_mining_weights)
         loss_values.append(loss.item())
 
         loss_tb.append(loss.item())
@@ -75,7 +75,7 @@ def validate_single_epoch(model: torch.nn.Module,
     pbar = tqdm(total=per_step_epoch)
     pbar.set_description(desc='validation')
     for batch_idx in range(per_step_epoch):
-        data_image, target, elevation, _ = cuda_batches_queue.get(block=True)
+        data_image, target, elevation, _, _ = cuda_batches_queue.get(block=True)
 
         with torch.no_grad():
             data_out = model(data_image, elevation)
@@ -98,6 +98,8 @@ def calculate_hard_mining_weights(model: torch.nn.Module,
                                   train_dataset: FluxDataset,
                                   hard_mining_dataset: FluxDataset,
                                   cuda_batches_queue: Queue,
+                                  logger: Logger,
+                                  epoch: int
                                   ):
     model.eval()
 
@@ -105,7 +107,7 @@ def calculate_hard_mining_weights(model: torch.nn.Module,
     pbar = tqdm(total=batch_number)
     pbar.set_description(desc='hard_mining')
     for batch_idx in range(batch_number):
-        data_image, target, elevation, row_ids = cuda_batches_queue.get(block=True)
+        data_image, target, elevation, row_ids, _ = cuda_batches_queue.get(block=True)
 
         with torch.no_grad():
             data_out = model(data_image, elevation)
@@ -116,13 +118,7 @@ def calculate_hard_mining_weights(model: torch.nn.Module,
         updater_df.set_index(pd.Index(row_ids), inplace=True)
         train_dataset.flux_frame.update(updater_df)
 
-        # np.save('error.npy', error)
-        # with open('train.pickle', 'wb') as file:
-        #     pickle.dump(train_dataset.flux_frame, file)
-        # with open('row_ids.pickle', 'wb') as file:
-        #     pickle.dump(row_ids, file)
-
-        # raise KeyboardInterrupt
+        logger.store_scatter_hard_mining_weights(train_dataset.flux_frame, epoch)
 
         pbar.update()
         pbar.set_postfix({'cuda_queue_len': cuda_batches_queue.qsize()})
@@ -195,13 +191,14 @@ def train_model(model: torch.nn.Module,
                 best_val_loss = val_loss
                 best_val_epoch = epoch
 
-            # every single pass of whole dataset
-            if epoch % int(len(train_dataset) / train_dataset.batch_size / steps_per_epoch_train + 1) == 0:
-            # if True:
+            # every single pass of whole dataset, not at epoch == 0
+            if epoch % int(len(train_dataset) / train_dataset.batch_size / steps_per_epoch_train + 1) == 0 and epoch:
                 calculate_hard_mining_weights(model,
                                               train_dataset,
                                               hard_mining_dataset,
-                                              hard_mining_batch_factory.cuda_queue)
+                                              hard_mining_batch_factory.cuda_queue,
+                                              logger,
+                                              epoch)
 
     except KeyboardInterrupt:
         pass

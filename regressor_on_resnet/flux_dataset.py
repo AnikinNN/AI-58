@@ -70,8 +70,9 @@ class FluxDataset:
         flux = self.flux_frame.iloc[index]['CM3up[W/m2]']
         elevation = self.flux_frame.iloc[index]['sun_altitude']
         row_id = self.flux_frame.iloc[index].name
+        hard_mining_weight = self.flux_frame.iloc[index]['hard_mining_weight']
 
-        return image, mask, flux, elevation, row_id
+        return image, mask, flux, elevation, row_id, hard_mining_weight
 
     def get_mask(self, photo_path):
         # /dasio/AI58/snapshots/snapshots-2021-07-27/img-2021-07-27T17-37-21devID2.jpg
@@ -106,7 +107,7 @@ class FluxDataset:
                     self.init_count = 1
 
             for obj_iloc in self.objects_iloc_generator:
-                image, mask, flux, elevation, row_id = self.get_data_by_id(obj_iloc)
+                image, mask, flux, elevation, row_id, hard_mining_weight = self.get_data_by_id(obj_iloc)
 
                 image = self.resize(image)
 
@@ -132,7 +133,7 @@ class FluxDataset:
                 with self.yield_lock:
                     if len(self.batch_y) < self.batch_size:
                         # resnet50 require input for 4-dimensional weight [64, 3, 7, 7]
-                        self.batch_x.append((image, elevation, row_id))
+                        self.batch_x.append((image, elevation, row_id, hard_mining_weight))
                         self.batch_y.append(flux)
 
                     if len(self.batch_y) >= self.batch_size:

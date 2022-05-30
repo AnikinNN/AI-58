@@ -44,7 +44,7 @@ modified_resnet.to(cuda_device)
 train_model(modified_resnet,
             train_dataset=train_set,
             val_dataset=val_set,
-            hard_mining_dataset = hard_mining_train_set,
+            hard_mining_dataset=hard_mining_train_set,
             logger=logger,
             cuda_device=cuda_device,
             max_epochs=250)
