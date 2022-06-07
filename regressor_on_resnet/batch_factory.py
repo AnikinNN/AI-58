@@ -28,7 +28,7 @@ def threaded_batches_feeder(to_kill, batches_queue, dataset_generator):
             return
 
 
-def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device):
+def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device, to_variable):
     while not to_kill():
         cuda_device = torch.device(cuda_device)
         (x, flux) = batches_queue.get(block=True)
@@ -39,9 +39,19 @@ def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device
         row_ids = tuple(i[2] for i in x)
         hard_mining_weights = np.array(tuple(i[3] for i in x))
 
-        flux = Variable(flux.float()).to(cuda_device)
-        img = Variable(img.float()).to(cuda_device)
-        elevation = Variable(elevation.float()).to(cuda_device)
+        flux = flux.float()
+        img = img.float()
+        elevation = elevation.float()
+
+        if to_variable:
+            flux = Variable(flux)
+            img = Variable(img)
+            elevation = Variable(elevation)
+
+        flux = flux.to(cuda_device)
+        img = img.to(cuda_device)
+        elevation = elevation.to(cuda_device)
+
         cuda_batches_queue.put((img, flux, elevation, row_ids, hard_mining_weights), block=True)
     print('cuda_feeder_killed')
     return
@@ -54,7 +64,8 @@ class BatchFactory:
                  cpu_queue_length=4,
                  cuda_queue_length=4,
                  preprocess_worker_number=4,
-                 cuda_feeder_number=1):
+                 cuda_feeder_number=1,
+                 to_variable=True):
         self.cpu_queue = Queue(maxsize=cpu_queue_length)
         self.cuda_queue = Queue(maxsize=cuda_queue_length)
 
@@ -71,7 +82,9 @@ class BatchFactory:
                                    args=(self.threads_killer,
                                          self.cuda_queue,
                                          self.cpu_queue,
-                                         cuda_device))
+                                         cuda_device,
+                                         to_variable)
+                                   )
             thr.start()
             self.cuda_feeders.append(thr)
 

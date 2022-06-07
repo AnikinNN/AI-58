@@ -41,6 +41,7 @@ class Logger:
         return max(numbers) + 1 if len(numbers) else 1
 
     def store_batch_as_image(self, tag, batch: torch.Tensor, global_step=None, inv_normalizer=None):
+        batch = batch.cpu().detach()
         if inv_normalizer is not None:
             batch = torch.stack([inv_normalizer(torch.squeeze(i)) for i in torch.split(batch, 1)], dim=0)
         self.tb_writer.add_images(tag, batch, global_step=global_step)
@@ -51,7 +52,7 @@ class Logger:
         x = hard_mining_frame['CM3up[W/m2]'].to_numpy()
         y = hard_mining_frame['hard_mining_weight'].to_numpy()
         ax.grid()
-        ax.plot(x, y,)
+        ax.scatter(x, y, s=1)
         self.tb_writer.add_figure('hard_mining_weights', [fig], epoch)
 
 

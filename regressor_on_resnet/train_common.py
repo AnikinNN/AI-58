@@ -1,4 +1,4 @@
-import pickle
+import warnings
 
 import pandas as pd
 import torch
@@ -6,7 +6,7 @@ from torch.autograd import Variable
 from torch.nn import MSELoss
 
 from tqdm import tqdm
-from queue import Queue, Empty
+from queue import Queue
 
 from regressor_on_resnet.flux_dataset import FluxDataset
 from regressor_on_resnet.nn_logging import Logger
@@ -31,15 +31,18 @@ def train_single_epoch(model: torch.nn.Module,
     model.train()
     loss_values = []
     loss_tb = []
-    pbar = tqdm(total=per_step_epoch, )
+    pbar = tqdm(total=per_step_epoch, ncols=10)
     pbar.set_description(desc='train')
+
+    warning_elapsed = False
+
     for batch_idx in range(per_step_epoch):
         data_image, target, elevation, _, hard_mining_weights = cuda_batches_queue.get(block=True)
 
-        if batch_idx == 0:
-            logger.store_batch_as_image('train_batch', data_image,
-                                        global_step=current_epoch,
-                                        inv_normalizer=FluxDataset.inv_normalizer)
+        # if batch_idx == 0:
+        #     logger.store_batch_as_image('train_batch', data_image,
+        #                                 global_step=current_epoch,
+        #                                 inv_normalizer=FluxDataset.inv_normalizer)
 
         target = Variable(target)
 
@@ -56,7 +59,13 @@ def train_single_epoch(model: torch.nn.Module,
         optimizer.step()
         pbar.update()
         pbar.set_postfix({'loss': loss.item(), 'cuda_queue_len': cuda_batches_queue.qsize()})
-        lr_scheduler.step()
+
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+        else:
+            if not warning_elapsed:
+                warnings.warn('lr_scheduler is None')
+                warning_elapsed = True
 
     pbar.close()
 
@@ -68,11 +77,12 @@ def validate_single_epoch(model: torch.nn.Module,
                           cuda_batches_queue: Queue,
                           per_step_epoch: int,
                           current_epoch: int,
-                          logger: Logger):
+                          logger: Logger,
+                          ):
     model.eval()
     loss_values = []
 
-    pbar = tqdm(total=per_step_epoch)
+    pbar = tqdm(total=per_step_epoch, ncols=10)
     pbar.set_description(desc='validation')
     for batch_idx in range(per_step_epoch):
         data_image, target, elevation, _, _ = cuda_batches_queue.get(block=True)
@@ -80,10 +90,10 @@ def validate_single_epoch(model: torch.nn.Module,
         with torch.no_grad():
             data_out = model(data_image, elevation)
 
-        if batch_idx == 0:
-            logger.store_batch_as_image('val_batch', data_image,
-                                        global_step=current_epoch,
-                                        inv_normalizer=FluxDataset.inv_normalizer)
+        # if batch_idx == 0:
+        #     logger.store_batch_as_image('val_batch', data_image,
+        #                                 global_step=current_epoch,
+        #                                 inv_normalizer=FluxDataset.inv_normalizer)
 
         loss = loss_function(data_out, target)
         loss_values.append(loss.item())
@@ -104,7 +114,7 @@ def calculate_hard_mining_weights(model: torch.nn.Module,
     model.eval()
 
     batch_number = len(hard_mining_dataset) // hard_mining_dataset.batch_size + 1
-    pbar = tqdm(total=batch_number)
+    pbar = tqdm(total=batch_number, ncols=10)
     pbar.set_description(desc='hard_mining')
     for batch_idx in range(batch_number):
         data_image, target, elevation, row_ids, _ = cuda_batches_queue.get(block=True)
@@ -118,11 +128,11 @@ def calculate_hard_mining_weights(model: torch.nn.Module,
         updater_df.set_index(pd.Index(row_ids), inplace=True)
         train_dataset.flux_frame.update(updater_df)
 
-        logger.store_scatter_hard_mining_weights(train_dataset.flux_frame, epoch)
-
         pbar.update()
         pbar.set_postfix({'cuda_queue_len': cuda_batches_queue.qsize()})
     pbar.close()
+
+    logger.store_scatter_hard_mining_weights(train_dataset.flux_frame, epoch)
 
     return
 
@@ -133,28 +143,34 @@ def train_model(model: torch.nn.Module,
                 hard_mining_dataset: FluxDataset,
                 logger: Logger,
                 cuda_device,
+                learning_rate=5e-4,
+                static_learning_rate=False,
                 max_epochs=480,
-                use_warmup: bool = False):
-    steps_per_epoch_train = 1536
-    steps_per_epoch_valid = 1024
-
+                use_warmup: bool = False,
+                steps_per_epoch_train=1536,
+                steps_per_epoch_valid=1024,
+                ):
     mse = MSELoss()
     weights, bounds = get_weights_and_bounds(train_dataset.flux_frame['CM3up[W/m2]'].to_numpy())
     weighted_mse = WeightedMse(weights, bounds)
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     # lr_scheduler.step() calls every batch
-    lr_scheduler = CosineAnnealingWarmupRestarts(optimizer,
-                                                 first_cycle_steps=128 * steps_per_epoch_train,
-                                                 cycle_mult=1.5,
-                                                 max_lr=1e-4,
-                                                 min_lr=5e-7,
-                                                 warmup_steps=steps_per_epoch_train if use_warmup else 0,
-                                                 gamma=0.8,
-                                                 last_epoch=-1)
+    if static_learning_rate:
+        lr_scheduler = None
+    else:
+        lr_scheduler = CosineAnnealingWarmupRestarts(optimizer,
+                                                     first_cycle_steps=128 * steps_per_epoch_train,
+                                                     cycle_mult=1.5,
+                                                     max_lr=1e-4,
+                                                     min_lr=5e-7,
+                                                     warmup_steps=steps_per_epoch_train if use_warmup else 0,
+                                                     gamma=0.8,
+                                                     last_epoch=-1)
 
-    train_batch_factory = BatchFactory(train_dataset, cuda_device, preprocess_worker_number=6)
-    validation_batch_factory = BatchFactory(val_dataset, cuda_device, preprocess_worker_number=15)
-    hard_mining_batch_factory = BatchFactory(hard_mining_dataset, cuda_device, preprocess_worker_number=15)
+    train_batch_factory = BatchFactory(train_dataset, cuda_device, preprocess_worker_number=15, to_variable=True)
+    validation_batch_factory = BatchFactory(val_dataset, cuda_device, preprocess_worker_number=15, to_variable=False)
+    hard_mining_batch_factory = BatchFactory(hard_mining_dataset, cuda_device, preprocess_worker_number=15,
+                                             to_variable=False)
 
     best_val_loss = float('Inf')
     best_val_epoch = -1
@@ -210,3 +226,4 @@ def train_model(model: torch.nn.Module,
         i.stop()
 
     print('train_model: done')
+    return best_val_loss

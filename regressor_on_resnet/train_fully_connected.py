@@ -47,6 +47,9 @@ train_model(modified_resnet,
             hard_mining_dataset=hard_mining_train_set,
             logger=logger,
             cuda_device=cuda_device,
-            max_epochs=250)
+            max_epochs=250,
+            steps_per_epoch_train=1536,
+            steps_per_epoch_valid=1024
+            )
 
 print()
