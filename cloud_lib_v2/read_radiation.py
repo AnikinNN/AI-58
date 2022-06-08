@@ -48,7 +48,8 @@ def read_radiation_from_dir(radiation_dir):
     for file in os.listdir(radiation_dir):
         # filter file names
         if re.findall(r"CR20\d{6}.txt", file):
-            radiation = radiation.append(read_single_radiation_file(os.path.join(radiation_dir, file)))
+            radiation = pd.concat((radiation, read_single_radiation_file(os.path.join(radiation_dir, file))),
+                                  ignore_index=True)
     radiation["radiation_datetime"] = pd.to_datetime(radiation['data time'], format="%d/%m/%Y %H:%M:%S")
     radiation.drop(columns='data time', inplace=True)
     radiation.sort_values(by="radiation_datetime", inplace=True)
