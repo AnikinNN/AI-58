@@ -8,6 +8,7 @@ from sklearn.utils import shuffle
 from torchvision.transforms import transforms
 from imgaug import SegmentationMapsOnImage, augmenters
 
+from regressor_on_resnet.flux_batch import FluxBatch
 from regressor_on_resnet.threadsafe_iterator import ThreadsafeIterator
 
 
@@ -53,8 +54,7 @@ class FluxDataset:
 
         self.output_size = (512, 512)
 
-        self.batch_x = None
-        self.batch_y = None
+        self.batch = None
 
     def __len__(self):
         return self.flux_frame.shape[0]
@@ -131,18 +131,16 @@ class FluxDataset:
 
                 # Concurrent access by multiple threads to the lists below
                 with self.yield_lock:
-                    if len(self.batch_y) < self.batch_size:
+                    if len(self.batch) < self.batch_size:
                         # resnet50 require input for 4-dimensional weight [64, 3, 7, 7]
-                        self.batch_x.append((image, elevation, row_id, hard_mining_weight))
-                        self.batch_y.append(flux)
+                        self.batch.append(image, elevation, flux, hard_mining_weight, row_id)
 
-                    if len(self.batch_y) >= self.batch_size:
-                        yield self.batch_x, self.batch_y
+                    if len(self.batch) >= self.batch_size:
+                        yield self.batch
                         self.clean_batch()
 
     def clean_batch(self):
-        self.batch_x = []
-        self.batch_y = []
+        self.batch = FluxBatch()
 
     def resize(self, image):
         result = cv2.resize(image, self.output_size)

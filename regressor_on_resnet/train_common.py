@@ -31,24 +31,22 @@ def train_single_epoch(model: torch.nn.Module,
     model.train()
     loss_values = []
     loss_tb = []
-    pbar = tqdm(total=per_step_epoch, ncols=10)
+    pbar = tqdm(total=per_step_epoch, ncols=100)
     pbar.set_description(desc='train')
 
     warning_elapsed = False
 
     for batch_idx in range(per_step_epoch):
-        data_image, target, elevation, _, hard_mining_weights = cuda_batches_queue.get(block=True)
+        batch = cuda_batches_queue.get(block=True)
 
-        # if batch_idx == 0:
-        #     logger.store_batch_as_image('train_batch', data_image,
-        #                                 global_step=current_epoch,
-        #                                 inv_normalizer=FluxDataset.inv_normalizer)
-
-        target = Variable(target)
+        if batch_idx == 0:
+            logger.store_batch_as_image('train_batch', batch.images,
+                                        global_step=current_epoch,
+                                        inv_normalizer=FluxDataset.inv_normalizer)
 
         optimizer.zero_grad()
-        data_out = model(data_image, elevation)
-        loss = loss_function(data_out, target, hard_mining_weights)
+        data_out = model(batch.images, batch.elevations)
+        loss = loss_function(data_out, batch.fluxes, batch.hard_mining_weights)
         loss_values.append(loss.item())
 
         loss_tb.append(loss.item())
@@ -82,20 +80,20 @@ def validate_single_epoch(model: torch.nn.Module,
     model.eval()
     loss_values = []
 
-    pbar = tqdm(total=per_step_epoch, ncols=10)
+    pbar = tqdm(total=per_step_epoch, ncols=100)
     pbar.set_description(desc='validation')
     for batch_idx in range(per_step_epoch):
-        data_image, target, elevation, _, _ = cuda_batches_queue.get(block=True)
+        batch = cuda_batches_queue.get(block=True)
 
         with torch.no_grad():
-            data_out = model(data_image, elevation)
+            data_out = model(batch.images, batch.elevations)
 
-        # if batch_idx == 0:
-        #     logger.store_batch_as_image('val_batch', data_image,
-        #                                 global_step=current_epoch,
-        #                                 inv_normalizer=FluxDataset.inv_normalizer)
+        if batch_idx == 0:
+            logger.store_batch_as_image('val_batch', batch.images,
+                                        global_step=current_epoch,
+                                        inv_normalizer=FluxDataset.inv_normalizer)
 
-        loss = loss_function(data_out, target)
+        loss = loss_function(data_out, batch.fluxes)
         loss_values.append(loss.item())
         pbar.update()
         pbar.set_postfix({'loss': loss.item(), 'cuda_queue_len': cuda_batches_queue.qsize()})
@@ -114,18 +112,18 @@ def calculate_hard_mining_weights(model: torch.nn.Module,
     model.eval()
 
     batch_number = len(hard_mining_dataset) // hard_mining_dataset.batch_size + 1
-    pbar = tqdm(total=batch_number, ncols=10)
+    pbar = tqdm(total=batch_number, ncols=100)
     pbar.set_description(desc='hard_mining')
     for batch_idx in range(batch_number):
-        data_image, target, elevation, row_ids, _ = cuda_batches_queue.get(block=True)
+        batch = cuda_batches_queue.get(block=True)
 
         with torch.no_grad():
-            data_out = model(data_image, elevation)
-            error = torch.abs(target - data_out).cpu().detach().numpy().flatten()
+            data_out = model(batch.images, batch.elevations)
+            error = torch.abs(batch.fluxes - data_out).cpu().detach().numpy().flatten()
 
         error = error / error.mean()
         updater_df = pd.DataFrame({'hard_mining_weight': error.tolist()})
-        updater_df.set_index(pd.Index(row_ids), inplace=True)
+        updater_df.set_index(pd.Index(batch.train_frame_indexes), inplace=True)
         train_dataset.flux_frame.update(updater_df)
 
         pbar.update()

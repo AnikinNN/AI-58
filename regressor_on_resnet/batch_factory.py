@@ -21,8 +21,8 @@ class ThreadKiller:
 
 
 def threaded_batches_feeder(to_kill, batches_queue, dataset_generator):
-    for img, target in dataset_generator:
-        batches_queue.put((img, target), block=True)
+    for batch in dataset_generator:
+        batches_queue.put(batch, block=True)
         if to_kill():
             print('cpu_feeder_killed')
             return
@@ -31,28 +31,10 @@ def threaded_batches_feeder(to_kill, batches_queue, dataset_generator):
 def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device, to_variable):
     while not to_kill():
         cuda_device = torch.device(cuda_device)
-        (x, flux) = batches_queue.get(block=True)
-
-        flux = torch.tensor(tuple([i] for i in flux))
-        img = torch.stack(tuple(i[0] for i in x))
-        elevation = torch.tensor(tuple([i[1]] for i in x))
-        row_ids = tuple(i[2] for i in x)
-        hard_mining_weights = np.array(tuple(i[3] for i in x))
-
-        flux = flux.float()
-        img = img.float()
-        elevation = elevation.float()
-
-        if to_variable:
-            flux = Variable(flux)
-            img = Variable(img)
-            elevation = Variable(elevation)
-
-        flux = flux.to(cuda_device)
-        img = img.to(cuda_device)
-        elevation = elevation.to(cuda_device)
-
-        cuda_batches_queue.put((img, flux, elevation, row_ids, hard_mining_weights), block=True)
+        batch = batches_queue.get(block=True)
+        batch.to_tensor()
+        batch.to_cuda(cuda_device, to_variable)
+        cuda_batches_queue.put(batch, block=True)
     print('cuda_feeder_killed')
     return
 
