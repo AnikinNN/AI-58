@@ -25,18 +25,15 @@ metadata_loader = MetadataLoader(('./../cloud_applications_v2/expeditions_config
 batch_size = 64
 train_set = FluxDataset(flux_frame=metadata_loader.train,
                         batch_size=batch_size,
-                        do_shuffle=True,
-                        do_augment=True)
+                        do_shuffle=True,)
 
 val_set = FluxDataset(flux_frame=metadata_loader.validation,
                       batch_size=batch_size,
-                      do_shuffle=True,
-                      do_augment=False)
+                      do_shuffle=True,)
 
 hard_mining_train_set = FluxDataset(flux_frame=metadata_loader.train,
                                     batch_size=batch_size,
-                                    do_shuffle=False,
-                                    do_augment=False)
+                                    do_shuffle=False,)
 
 modified_resnet = ResnetRegressor()
 modified_resnet.to(cuda_device)

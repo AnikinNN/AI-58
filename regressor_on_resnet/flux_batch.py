@@ -14,6 +14,7 @@ class FluxBatchState(Enum):
 class FluxBatch:
     def __init__(self):
         self.images = []
+        self.masks = []
         self.elevations = []
         self.fluxes = []
         self.hard_mining_weights = []
@@ -24,13 +25,14 @@ class FluxBatch:
     def __len__(self):
         return len(self.train_frame_indexes)
 
-    def append(self, image: torch.Tensor, elevation: float,
+    def append(self, image: np.ndarray, mask: np.ndarray, elevation: float,
                flux: float, hard_mining_weight: float, train_frame_index: int):
         if self.state is not FluxBatchState.CPU_APPENDING:
             raise ValueError(f'You can append to batch only on FluxBatchState.CPU_APPENDING state. '
                              f'But there was an attempt on {self.state} state')
 
         self.images.append(image)
+        self.masks.append(mask)
         self.elevations.append(elevation)
         self.fluxes.append(flux)
         self.hard_mining_weights.append(hard_mining_weight)
@@ -41,12 +43,12 @@ class FluxBatch:
             raise ValueError(f'You can convert to tensor only from FluxBatchState.CPU_APPENDING state. '
                              f'But there was an attempt on {self.state} state')
 
-        self.fluxes = torch.reshape(torch.tensor(self.fluxes), (-1, 1))
-        self.images = torch.stack(self.images)
-        # may be useful for moving augmentation to GPU
-        # self.images = torch.stack(tuple((i / 255.).transpose(2, 0, 1) for i in self.images))
+        self.images = torch.stack(tuple(torch.tensor((i / 255.).transpose(2, 0, 1)) for i in self.images))
+        self.masks = torch.stack(tuple(torch.tensor(i.transpose(2, 0, 1)) for i in self.masks))
         self.elevations = torch.reshape(torch.tensor(self.elevations), (-1, 1))
+        self.fluxes = torch.reshape(torch.tensor(self.fluxes), (-1, 1))
         self.hard_mining_weights = np.array(self.hard_mining_weights)
+
         self.state = FluxBatchState.CPU_STORING
 
     def to_cuda(self, cuda_device, to_variable: bool):
@@ -56,14 +58,18 @@ class FluxBatch:
 
         self.fluxes = self.fluxes.float()
         self.images = self.images.float()
+        self.masks = self.masks.float()
         self.elevations = self.elevations.float()
 
         if to_variable:
             self.fluxes = Variable(self.fluxes)
             self.images = Variable(self.images)
+            self.masks = Variable(self.masks)
             self.elevations = Variable(self.elevations)
 
         self.fluxes = self.fluxes.to(cuda_device)
         self.images = self.images.to(cuda_device)
+        self.masks = self.masks.to(cuda_device)
         self.elevations = self.elevations.to(cuda_device)
+
         self.state = FluxBatchState.CUDA_STORING

@@ -6,6 +6,7 @@ import torch
 from torch.autograd import Variable
 
 from regressor_on_resnet.flux_dataset import FluxDataset
+from regressor_on_resnet.gpu_augmenter import Augmenter
 
 
 class ThreadKiller:
@@ -20,21 +21,42 @@ class ThreadKiller:
         self.to_kill = to_kill
 
 
-def threaded_batches_feeder(to_kill, batches_queue, dataset_generator):
+def threaded_batches_feeder(to_kill, target_queue, dataset_generator):
+    """
+    takes batch from dataset_generator and put to target_queue until to_kill
+    """
     for batch in dataset_generator:
-        batches_queue.put(batch, block=True)
+        target_queue.put(batch, block=True)
         if to_kill():
             print('cpu_feeder_killed')
             return
 
 
-def threaded_cuda_feeder(to_kill, cuda_batches_queue, batches_queue, cuda_device, to_variable):
+def threaded_cuda_feeder(to_kill, target_queue, source_queue, cuda_device, to_variable, do_augment):
+    """
+    takes batch from source_queue, transforms data to tensors, puts to target_queue until to_kill
+    """
     while not to_kill():
         cuda_device = torch.device(cuda_device)
-        batch = batches_queue.get(block=True)
+        batch = source_queue.get(block=True)
         batch.to_tensor()
         batch.to_cuda(cuda_device, to_variable)
-        cuda_batches_queue.put(batch, block=True)
+        if do_augment:
+            batch.images = Augmenter.call(batch)
+        target_queue.put(batch, block=True)
+    print('cuda_feeder_killed')
+    return
+
+
+def threaded_cuda_augmenter(to_kill, target_queue, source_queue, do_augment):
+    """
+    takes batch from source_queue, applies augmentations if do_augment, applies mask, puts to target_queue until to_kill
+    """
+    while not to_kill():
+        batch = source_queue.get(block=True)
+        if do_augment:
+            batch.images = Augmenter.call(batch)
+        target_queue.put(batch, block=True)
     print('cuda_feeder_killed')
     return
 
@@ -43,11 +65,13 @@ class BatchFactory:
     def __init__(self,
                  dataset: FluxDataset,
                  cuda_device,
-                 cpu_queue_length=4,
-                 cuda_queue_length=4,
-                 preprocess_worker_number=4,
-                 cuda_feeder_number=1,
-                 to_variable=True):
+                 do_augment: bool,
+                 cpu_queue_length: int = 4,
+                 cuda_queue_length: int = 4,
+                 preprocess_worker_number: int = 4,
+                 cuda_feeder_number: int = 1,
+                 to_variable: bool = True,
+                 ):
         self.cpu_queue = Queue(maxsize=cpu_queue_length)
         self.cuda_queue = Queue(maxsize=cuda_queue_length)
 
@@ -65,7 +89,8 @@ class BatchFactory:
                                          self.cuda_queue,
                                          self.cpu_queue,
                                          cuda_device,
-                                         to_variable)
+                                         to_variable,
+                                         do_augment)
                                    )
             thr.start()
             self.cuda_feeders.append(thr)

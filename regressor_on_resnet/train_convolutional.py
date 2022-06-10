@@ -25,18 +25,15 @@ pretrained_loader.init_using_logger(logger, base_run_number)
 
 train_set = FluxDataset(flux_frame=pretrained_loader.train,
                         batch_size=batch_size,
-                        do_shuffle=True,
-                        do_augment=True)
+                        do_shuffle=True)
 
 val_set = FluxDataset(flux_frame=pretrained_loader.validation,
                       batch_size=batch_size,
-                      do_shuffle=True,
-                      do_augment=False)
+                      do_shuffle=True)
 
 hard_mining_train_set = FluxDataset(flux_frame=pretrained_loader.train,
                                     batch_size=batch_size,
-                                    do_shuffle=False,
-                                    do_augment=False)
+                                    do_shuffle=False)
 
 modified_resnet = pretrained_loader.model
 modified_resnet.set_train_convolutional_part(True)

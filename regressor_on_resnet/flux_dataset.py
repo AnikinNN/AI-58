@@ -22,20 +22,12 @@ def get_object_index(objects_count):
 
 
 class FluxDataset:
-    normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-
-    inv_normalizer = transforms.Compose([
-        transforms.Normalize((0., 0., 0.), (1 / 0.229, 1 / 0.224, 1 / 0.225)),
-        transforms.Normalize((-0.485, -0.456, -0.406), (1., 1., 1.)),
-    ])
-
-    def __init__(self, flux_frame, batch_size=32, do_shuffle=True, do_augment=True):
+    def __init__(self, flux_frame, batch_size=32, do_shuffle=True):
 
         self.flux_frame = flux_frame
         self.mask_dict = {}
 
         self.do_shuffle = do_shuffle
-        self.do_augment = do_augment
         self.batch_size = batch_size
 
         self.objects_iloc_generator = ThreadsafeIterator(get_object_index(self.flux_frame.shape[0]))
@@ -44,17 +36,9 @@ class FluxDataset:
         self.yield_lock = threading.Lock()  # mutex for generator yielding of batch
         self.init_count = 0
 
-        self.augmentation_sequence = augmenters.Sequential([
-            augmenters.Fliplr(0.5),
-            augmenters.Flipud(0.5),
-            # augmenters.Dropout([0.05, 0.2]),
-            augmenters.Affine(shear=(-5, 5), rotate=(-45, 45)),
-            augmenters.MultiplyAndAddToBrightness(mul=(0.85, 1.15), add=(-20, 20))
-        ], random_order=True)
-
         self.output_size = (512, 512)
 
-        self.batch = None
+        self.batch = FluxBatch()
 
     def __len__(self):
         return self.flux_frame.shape[0]
@@ -92,9 +76,13 @@ class FluxDataset:
         return cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
 
     def load_mask(self, mask_path):
-        image = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        image = self.resize(image)
-        self.mask_dict[mask_path] = np.where(image > 0, True, False)
+        # read in grayscale
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        mask = self.resize(mask)
+        # convert to mask with 0 and 1 to use it as multiplier to an actual image
+        mask = np.where(mask > 0, 1., 0.)
+        # make it 3d along new axis and store
+        self.mask_dict[mask_path] = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
 
     def __iter__(self):
         while True:
@@ -110,30 +98,13 @@ class FluxDataset:
                 image, mask, flux, elevation, row_id, hard_mining_weight = self.get_data_by_id(obj_iloc)
 
                 image = self.resize(image)
-
-                if self.do_augment:
-                    segmentation_maps = SegmentationMapsOnImage(mask, shape=image.shape)
-                    image, segmentation_maps = self.augmentation_sequence(image=image,
-                                                                          segmentation_maps=segmentation_maps)
-                    mask = segmentation_maps.draw()[0]
-                    mask = np.where(mask > 0, 1, 0).transpose(2, 0, 1)
-                    # add noise and limit if necessary
-                    elevation = np.clip(np.random.normal(elevation, 1), -90, 90)
-                else:
-                    pass
-
-                image = (image / 255.0).transpose(2, 0, 1)
-                image = torch.from_numpy(image)
-                image = self.normalizer(image)
-
-                image = image * mask
                 elevation = np.sin(np.radians(elevation))
 
                 # Concurrent access by multiple threads to the lists below
                 with self.yield_lock:
                     if len(self.batch) < self.batch_size:
                         # resnet50 require input for 4-dimensional weight [64, 3, 7, 7]
-                        self.batch.append(image, elevation, flux, hard_mining_weight, row_id)
+                        self.batch.append(image, mask, elevation, flux, hard_mining_weight, row_id)
 
                     if len(self.batch) >= self.batch_size:
                         yield self.batch

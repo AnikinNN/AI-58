@@ -2,7 +2,6 @@ import warnings
 
 import pandas as pd
 import torch
-from torch.autograd import Variable
 from torch.nn import MSELoss
 
 from tqdm import tqdm
@@ -12,6 +11,7 @@ from regressor_on_resnet.flux_dataset import FluxDataset
 from regressor_on_resnet.nn_logging import Logger
 from regressor_on_resnet.sgdr_restarts_warmup import CosineAnnealingWarmupRestarts
 from regressor_on_resnet.batch_factory import BatchFactory
+from regressor_on_resnet.gpu_augmenter import Augmenter
 
 import numpy as np
 import os
@@ -42,7 +42,7 @@ def train_single_epoch(model: torch.nn.Module,
         if batch_idx == 0:
             logger.store_batch_as_image('train_batch', batch.images,
                                         global_step=current_epoch,
-                                        inv_normalizer=FluxDataset.inv_normalizer)
+                                        inv_normalizer=Augmenter.inv_normalizer)
 
         optimizer.zero_grad()
         data_out = model(batch.images, batch.elevations)
@@ -91,7 +91,7 @@ def validate_single_epoch(model: torch.nn.Module,
         if batch_idx == 0:
             logger.store_batch_as_image('val_batch', batch.images,
                                         global_step=current_epoch,
-                                        inv_normalizer=FluxDataset.inv_normalizer)
+                                        inv_normalizer=Augmenter.inv_normalizer)
 
         loss = loss_function(data_out, batch.fluxes)
         loss_values.append(loss.item())
@@ -165,9 +165,20 @@ def train_model(model: torch.nn.Module,
                                                      gamma=0.8,
                                                      last_epoch=-1)
 
-    train_batch_factory = BatchFactory(train_dataset, cuda_device, preprocess_worker_number=15, to_variable=True)
-    validation_batch_factory = BatchFactory(val_dataset, cuda_device, preprocess_worker_number=15, to_variable=False)
-    hard_mining_batch_factory = BatchFactory(hard_mining_dataset, cuda_device, preprocess_worker_number=15,
+    train_batch_factory = BatchFactory(train_dataset,
+                                       cuda_device,
+                                       do_augment=True,
+                                       preprocess_worker_number=15,
+                                       to_variable=True)
+    validation_batch_factory = BatchFactory(val_dataset,
+                                            cuda_device,
+                                            do_augment=False,
+                                            preprocess_worker_number=15,
+                                            to_variable=False)
+    hard_mining_batch_factory = BatchFactory(hard_mining_dataset,
+                                             cuda_device,
+                                             do_augment=False,
+                                             preprocess_worker_number=15,
                                              to_variable=False)
 
     best_val_loss = float('Inf')
