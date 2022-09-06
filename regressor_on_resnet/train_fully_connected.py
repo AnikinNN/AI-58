@@ -22,7 +22,7 @@ metadata_loader = MetadataLoader(('./../cloud_applications_v2/expeditions_config
                                  radiation_threshold=10,
                                  split=(0.6, 0.2, 0.2),
                                  store_path=logger.misc_dir)
-batch_size = 64
+batch_size = 32
 train_set = FluxDataset(flux_frame=metadata_loader.train,
                         batch_size=batch_size,
                         do_shuffle=True,)
@@ -44,9 +44,11 @@ train_model(modified_resnet,
             hard_mining_dataset=hard_mining_train_set,
             logger=logger,
             cuda_device=cuda_device,
-            max_epochs=250,
+            learning_rate=20e-5,
+            max_epochs=256,
             steps_per_epoch_train=1536,
-            steps_per_epoch_valid=1024
+            steps_per_epoch_valid=1024,
+            train_convolutional_since_epoch=128
             )
 
 print()

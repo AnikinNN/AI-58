@@ -13,33 +13,50 @@ class Augmenter:
         transforms.Normalize((-0.485, -0.456, -0.406), (1., 1., 1.)),
     ])
 
-    @staticmethod
-    def sampler(delta: float = 1, center: float = 0):
-        return (np.random.rand() - 0.5) * 2 * delta + center
+    class Sampler:
+        def __init__(self):
+            self.rotation_angle = self.sampler(5)
+            self.shear_x = self.sampler(5)
+            self.shear_y = self.sampler(5)
+            self.flip_ud = self.sampler(0.5, 0.5)
+            self.flip_lr = self.sampler(0.5, 0.5)
+            self.brightness_multiplier = self.sampler(0.02, 1)
+            self.brightness_delta = self.sampler(0.02)
+
+        @staticmethod
+        def sampler(delta: float = 1, center: float = 0):
+            return (np.random.rand() - 0.5) * 2 * delta + center
 
     @classmethod
-    def augment(cls, images: torch.Tensor, is_mask: bool):
+    def augment_image(cls, images: torch.Tensor, is_mask: bool, sampler: Sampler):
 
-        images = transforms.functional.affine(images, cls.sampler(45), [0, 0], 1,
-                                              [cls.sampler(5), cls.sampler(5)],
+        images = transforms.functional.affine(images, sampler.rotation_angle, [0, 0], 1,
+                                              [sampler.shear_x, sampler.shear_y],
                                               interpolation=transforms.InterpolationMode.NEAREST)
 
-        if cls.sampler(0.5, 0.5) > 0.5:
-            images = torch.flip(images, dims=[1])
-        if cls.sampler(0.5, 0.5) > 0.5:
+        if sampler.flip_ud > 0.5:
             images = torch.flip(images, dims=[2])
+        if sampler.flip_lr > 0.5:
+            images = torch.flip(images, dims=[3])
 
         if not is_mask:
-            images = transforms.functional.adjust_brightness(images, cls.sampler(0.15, 1))
-            images = (images + cls.sampler(0.2)).clamp(0, 1.0)
-            images = cls.normalizer(images)
+            images = transforms.functional.adjust_brightness(images, sampler.brightness_multiplier)
+            images = (images + sampler.brightness_delta).clamp(0, 1.0)
         return images
 
     @classmethod
+    def augment_elevation(cls, elevation: torch.Tensor):
+        elevation_augmented = torch.clip(torch.normal(elevation, 1.0), -90, 90)
+        elevation_sin = torch.sin(torch.deg2rad(elevation_augmented))
+        return elevation_sin
+
+    @classmethod
     def __call__(cls, batch: FluxBatch):
-        images = cls.augment(batch.images, False)
-        masks = cls.augment(batch.masks, True)
-        return images * masks
+        sampler = cls.Sampler()
+        images = cls.augment_image(batch.images, False, sampler)
+        masks = cls.augment_image(batch.masks, True, sampler)
+        elevations = cls.augment_elevation(batch.elevations)
+        return images, masks, elevations
 
     @classmethod
     def call(cls, batch: FluxBatch):

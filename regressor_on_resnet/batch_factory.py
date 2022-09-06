@@ -42,7 +42,9 @@ def threaded_cuda_feeder(to_kill, target_queue, source_queue, cuda_device, to_va
         batch.to_tensor()
         batch.to_cuda(cuda_device, to_variable)
         if do_augment:
-            batch.images = Augmenter.call(batch)
+            batch.images, batch.masks, batch.elevations = Augmenter.call(batch)
+        batch.images = Augmenter.normalizer(batch.images)
+        batch.images = batch.images * batch.masks
         target_queue.put(batch, block=True)
     print('cuda_feeder_killed')
     return
