@@ -1,6 +1,8 @@
 import os
 import sys
 
+import numpy as np
+
 sys.path.append(os.path.join(sys.path[0], '..'))
 
 import torch

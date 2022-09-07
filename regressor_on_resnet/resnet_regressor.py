@@ -26,7 +26,7 @@ class ResnetRegressor(torch.nn.Module):
 
         self.fully_connected = torch.nn.Sequential(*layers)
 
-    def forward(self, image_batch, elevation_batch):
+    def forward(self, image_batch: torch.Tensor, elevation_batch: torch.Tensor):
         features = self.resnet(image_batch)
         result = self.fully_connected(torch.cat((features, elevation_batch), dim=1))
         return result
@@ -34,3 +34,11 @@ class ResnetRegressor(torch.nn.Module):
     def set_train_convolutional_part(self, value: bool):
         for param in self.resnet.parameters():
             param.requires_grad = value
+
+
+class ResnetClassifier(ResnetRegressor):
+    def __init__(self, widths: tuple = (512, 128)):
+        super().__init__(widths)
+        self.fully_connected[-1] = nn.Linear(in_features=self.widths[-2], out_features=8)
+
+        self.fully_connected.append(SoftMax)

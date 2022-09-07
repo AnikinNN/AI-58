@@ -98,7 +98,6 @@ class FluxDataset:
                 image, mask, flux, elevation, row_id, hard_mining_weight = self.get_data_by_id(obj_iloc)
 
                 image = self.resize(image)
-                elevation = np.sin(np.radians(elevation))
 
                 # Concurrent access by multiple threads to the lists below
                 with self.yield_lock:
