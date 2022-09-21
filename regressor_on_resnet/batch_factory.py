@@ -43,6 +43,7 @@ def threaded_cuda_feeder(to_kill, target_queue, source_queue, cuda_device, to_va
         batch.to_cuda(cuda_device, to_variable)
         if do_augment:
             batch.images, batch.masks, batch.elevations = Augmenter.call(batch)
+        batch.elevations = torch.sin(torch.deg2rad(batch.elevations))
         batch.images = Augmenter.normalizer(batch.images)
         batch.images = batch.images * batch.masks
         target_queue.put(batch, block=True)

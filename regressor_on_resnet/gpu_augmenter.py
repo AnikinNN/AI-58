@@ -47,8 +47,7 @@ class Augmenter:
     @classmethod
     def augment_elevation(cls, elevation: torch.Tensor):
         elevation_augmented = torch.clip(torch.normal(elevation, 1.0), -90, 90)
-        elevation_sin = torch.sin(torch.deg2rad(elevation_augmented))
-        return elevation_sin
+        return elevation_augmented
 
     @classmethod
     def __call__(cls, batch: FluxBatch):
