@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torchvision import transforms
 
-from regressor_on_resnet.flux_batch import FluxBatch
+from regressor_on_resnet.batch import FluxBatch
 
 
 class Augmenter:

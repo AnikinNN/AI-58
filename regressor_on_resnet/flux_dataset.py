@@ -8,7 +8,7 @@ from sklearn.utils import shuffle
 from torchvision.transforms import transforms
 from imgaug import SegmentationMapsOnImage, augmenters
 
-from regressor_on_resnet.flux_batch import FluxBatch
+from regressor_on_resnet.batch import FluxBatch
 from regressor_on_resnet.threadsafe_iterator import ThreadsafeIterator
 
 
