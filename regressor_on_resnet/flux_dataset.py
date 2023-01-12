@@ -1,19 +1,17 @@
 import os
 import cv2
-import torch
+import pandas as pd
 import threading
 import numpy as np
-
 from sklearn.utils import shuffle
-from torchvision.transforms import transforms
-from imgaug import SegmentationMapsOnImage, augmenters
 
 from regressor_on_resnet.batch import FluxBatch
 from regressor_on_resnet.threadsafe_iterator import ThreadsafeIterator
 
 
 def get_object_index(objects_count):
-    """Cyclic generator of indices from 0 to objects_count
+    """
+    Cyclic generator of indices from 0 to objects_count
     """
     current_id = 0
     while True:
@@ -22,23 +20,27 @@ def get_object_index(objects_count):
 
 
 class FluxDataset:
-    def __init__(self, flux_frame, batch_size=32, do_shuffle=True):
-
+    def __init__(self,
+                 flux_frame: pd.DataFrame,
+                 batch_size: int,
+                 do_shuffle: bool,
+                 output_size: tuple[int, int],
+                 batch_fields: list[str, ...]):
         self.flux_frame = flux_frame
-        self.mask_dict = {}
-
         self.do_shuffle = do_shuffle
         self.batch_size = batch_size
+        self.output_size = output_size
+        self.batch_fields = batch_fields
 
         self.objects_iloc_generator = ThreadsafeIterator(get_object_index(self.flux_frame.shape[0]))
+        self.yield_lock = threading.Lock()
 
-        self.lock = threading.Lock()  # mutex for input path
-        self.yield_lock = threading.Lock()  # mutex for generator yielding of batch
-        self.init_count = 0
+        self.batch: FluxBatch = None
+        self.clean_batch()
+        self.mask_dict = {}
 
-        self.output_size = (512, 512)
-
-        self.batch = FluxBatch()
+        if self.do_shuffle:
+            self.shuffle_data()
 
     def __len__(self):
         return self.flux_frame.shape[0]
@@ -48,15 +50,27 @@ class FluxDataset:
             self.flux_frame = shuffle(self.flux_frame)
 
     def get_data_by_id(self, index):
-        photo_path = self.flux_frame.iloc[index]['photo_path']
-        image = self.imread(photo_path)
-        mask = self.get_mask(photo_path)
-        flux = self.flux_frame.iloc[index]['CM3up[W/m2]']
-        elevation = self.flux_frame.iloc[index]['sun_altitude']
-        row_id = self.flux_frame.iloc[index].name
-        hard_mining_weight = self.flux_frame.iloc[index]['hard_mining_weight']
+        result = {}
+        row = self.flux_frame.iloc[index]
+        photo_path = row['photo_path']
 
-        return image, mask, flux, elevation, row_id, hard_mining_weight
+        for field in self.batch_fields:
+            if field == 'images':
+                result[field] = self.get_image(photo_path)
+            elif field == 'masks':
+                result[field] = self.get_mask(photo_path)
+            elif field == 'fluxes':
+                result[field] = row['CM3up[W/m2]']
+            elif field == 'elevations':
+                result[field] = row['sun_altitude']
+            elif field == 'train_frame_indexes':
+                result[field] = row.name
+            elif field == 'hard_mining_weights':
+                result[field] = row['hard_mining_weight']
+            else:
+                raise ValueError(f'got {field=} which is unsupported')
+
+        return result
 
     def get_mask(self, photo_path):
         # /dasio/AI58/snapshots/snapshots-2021-07-27/img-2021-07-27T17-37-21devID2.jpg
@@ -75,6 +89,13 @@ class FluxDataset:
         """reads using cv2 and converts to RGB"""
         return cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
 
+    def get_image(self, path):
+        image = self.imread(path)
+        image = self.resize(image)
+        # make a torch style image
+        image = (image / 255.).transpose(2, 0, 1)
+        return image
+
     def load_mask(self, mask_path):
         # read in grayscale
         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
@@ -82,28 +103,17 @@ class FluxDataset:
         # convert to mask with 0 and 1 to use it as multiplier to an actual image
         mask = np.where(mask > 0, 1., 0.)
         # make it 3d along new axis and store
-        self.mask_dict[mask_path] = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
+        self.mask_dict[mask_path] = np.repeat(mask[np.newaxis, :, :], 3, axis=0)
 
     def __iter__(self):
         while True:
-            with self.lock:
-                # todo implement initial shuffle without using self.init_count
-                if self.init_count == 0:
-                    self.shuffle_data()
-                    # clean batch_data
-                    self.clean_batch()
-                    self.init_count = 1
-
             for obj_iloc in self.objects_iloc_generator:
-                image, mask, flux, elevation, row_id, hard_mining_weight = self.get_data_by_id(obj_iloc)
-
-                image = self.resize(image)
+                batch_appendix = self.get_data_by_id(obj_iloc)
 
                 # Concurrent access by multiple threads to the lists below
                 with self.yield_lock:
                     if len(self.batch) < self.batch_size:
-                        # resnet50 require input for 4-dimensional weight [64, 3, 7, 7]
-                        self.batch.append(image, mask, elevation, flux, hard_mining_weight, row_id)
+                        self.batch.append(**batch_appendix)
 
                     if len(self.batch) >= self.batch_size:
                         yield self.batch
