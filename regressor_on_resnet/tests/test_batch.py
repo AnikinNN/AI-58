@@ -15,7 +15,7 @@ def test_batch_lifetime():
 
     batch_len = 10
     for i in range(batch_len):
-        batch.append(images=[69 + i, 420], train_frame_indexes=i)
+        batch.append(images=[69 + i, 420], train_frame_indexes=i, fluxes=i * 13)
 
     assert len(batch) == batch_len
     assert len(batch.images) == batch_len
@@ -24,10 +24,12 @@ def test_batch_lifetime():
     batch.to_tensor()
 
     assert isinstance(batch.images, torch.Tensor)
+    assert isinstance(batch.fluxes, torch.Tensor)
     assert batch.masks is None
     assert isinstance(batch.train_frame_indexes, list)
 
     assert batch.images.shape == (batch_len, 2)
+    assert batch.fluxes.shape == (batch_len, 1)
 
     cuda_device = torch.device(0)
     batch.to_cuda(True, cuda_device)

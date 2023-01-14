@@ -24,7 +24,8 @@ def test_augment_image():
 
 
 def test_augment_elevation():
-    elevations = torch.rand(32, 1) * 90
+    elevations = torch.normal(45, 5, (32, 1))
+    elevations = Augmenter.augment_elevation(elevations)
 
     elevations_mean = elevations.mean().item()
     assert np.isclose(elevations_mean, 45, atol=3)

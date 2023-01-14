@@ -17,6 +17,7 @@ class FluxBatch:
             'images',
             'masks',
             'elevations',
+            'fluxes'
         ]
 
         self.images = []
@@ -69,7 +70,13 @@ class FluxBatch:
         for i in self.tensor_attributes:
             attribute = self.__getattribute__(i)
             if len(attribute):
-                self.__setattr__(i, torch.tensor(np.stack(attribute, axis=0)))
+                tensor = torch.tensor(np.stack(attribute, axis=0))
+
+                # in case of single number value
+                if tensor.shape == (self.__len__(),):
+                    tensor = tensor.unsqueeze(dim=1)
+
+                self.__setattr__(i, tensor)
             else:
                 self.__setattr__(i, None)
 

@@ -60,8 +60,11 @@ def test_dataset_generator_synthetic(tmp_path: Path):
     assert batch.images.shape == batch.masks.shape
     assert batch.images.shape == (32, 3, 512, 512)
 
-    assert batch.elevations[0] == 45
-    assert batch.fluxes[0] == 10
+    assert batch.elevations.shape == (32, 1)
+    assert batch.fluxes.shape == (32, 1)
+
+    assert batch.elevations[0, 0] == 45
+    assert batch.fluxes[0, 0] == 10
 
 
 def test_dataset_generator_real():
