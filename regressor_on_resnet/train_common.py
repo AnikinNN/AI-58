@@ -39,7 +39,7 @@ def train_single_epoch(model: torch.nn.Module,
                                         inv_normalizer=Normalizer.inv_normalizer)
 
         optimizer.zero_grad()
-        model_output = model(batch.images, batch.elevations)
+        model_output = model(batch)
         loss = loss_function(model_output, batch)
         loss_history.append(loss.item())
 
@@ -83,7 +83,7 @@ def validate_single_epoch(model: torch.nn.Module,
         batch = cuda_batches_queue.get(block=True)
 
         with torch.no_grad():
-            model_output = model(batch.images, batch.elevations)
+            model_output = model(batch)
 
         if batch_idx == 0 and current_epoch == 0:
             logger.store_batch_as_image('val_batch', batch.images,
@@ -94,7 +94,8 @@ def validate_single_epoch(model: torch.nn.Module,
             metrics_values[i].append(metric(model_output, batch).item())
 
         pbar.update()
-        metrics_pbar = {metrics[i].__class__.__name__: metrics_values[i][-1] for i in range(len(metrics))}
+        metrics_pbar = {f'validation {metrics[i].__class__.__name__}': metrics_values[i][-1]
+                        for i in range(len(metrics))}
         pbar.set_postfix({**metrics_pbar, 'cuda_queue_len': cuda_batches_queue.qsize()})
     pbar.close()
 
@@ -107,7 +108,7 @@ def validate_single_epoch(model: torch.nn.Module,
 
 
 def train_model(model: ResnetRegressor,
-                loss,
+                loss: Metric,
                 validation_metrics: list[Metric],
                 train_batch_factory: BatchFactory,
                 validation_batch_factory: BatchFactory,
