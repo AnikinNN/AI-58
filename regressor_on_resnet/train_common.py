@@ -1,175 +1,148 @@
-import warnings
 from typing import Union
 import numpy as np
 import os
 import torch
 from tqdm import tqdm
-from queue import Queue
 
 from regressor_on_resnet.metrics import Metric
-from regressor_on_resnet.nn_logging import Logger
+from regressor_on_resnet.nn_logging import Logger, BestModelSaver
 from regressor_on_resnet.sgdr_restarts_warmup import CosineAnnealingWarmupRestarts
 from regressor_on_resnet.batch_factory import BatchFactory
 from regressor_on_resnet.normalizer import Normalizer
 from regressor_on_resnet.resnet_regressor import ResnetRegressor
 
 
-def train_single_epoch(model: torch.nn.Module,
-                       optimizer: torch.optim.Optimizer,
-                       loss_function: Metric,
-                       cuda_batches_queue: Queue,
-                       per_step_epoch: int,
-                       current_epoch: int,
-                       logger: Logger,
-                       lr_scheduler
-                       ):
-    model.train()
-    loss_history = []
-    pbar = tqdm(total=per_step_epoch, ncols=100)
-    pbar.set_description(desc='train')
+class Trainer:
+    def __init__(self,
+                 model: ResnetRegressor,
+                 loss: Metric,
+                 validation_metrics: list[Metric],
+                 train_batch_factory: BatchFactory,
+                 validation_batch_factory: BatchFactory,
+                 logger: Logger,
+                 max_epochs: int,
+                 steps_per_epoch_train: int,
+                 steps_per_epoch_valid: int,
+                 train_convolutional_since_epoch: int,
+                 optimizer: torch.optim.Optimizer,
+                 lr_scheduler: Union[None, CosineAnnealingWarmupRestarts],
+                 ):
+        self.model = model
+        self.loss = loss
+        self.validation_metrics = validation_metrics
+        self.train_batch_factory = train_batch_factory
+        self.validation_batch_factory = validation_batch_factory
+        self.logger = logger
+        self.max_epochs = max_epochs
+        self.steps_per_epoch_train = steps_per_epoch_train
+        self.steps_per_epoch_valid = steps_per_epoch_valid
+        self.train_convolutional_since_epoch = train_convolutional_since_epoch
+        self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
 
-    warning_elapsed = False
+    def train_model(self):
+        try:
+            for epoch in range(self.max_epochs):
+                print(f'Epoch {epoch} / {self.max_epochs}')
 
-    for batch_idx in range(per_step_epoch):
-        batch = cuda_batches_queue.get(block=True)
+                # enable training of convolutional part at desired epoch
+                if self.train_convolutional_since_epoch is not None and self.train_convolutional_since_epoch == epoch:
+                    print('train convolutional on')
+                    self.model.set_train_convolutional_part(True)
 
-        if batch_idx == 0 and current_epoch == 0:
-            logger.store_batch_as_image('train_batch', batch.images,
-                                        global_step=current_epoch,
-                                        inv_normalizer=Normalizer.inv_normalizer)
+                train_loss = self.train_single_epoch(current_epoch=epoch)
+                print(f'Train loss: {train_loss}')
 
-        optimizer.zero_grad()
-        model_output = model(batch)
-        loss = loss_function(model_output, batch)
-        loss_history.append(loss.item())
+                validation_result = self.validate_single_epoch(current_epoch=epoch)
+                print(f'Validation result: {validation_result}')
 
-        loss.backward()
-        optimizer.step()
+                val_mse = validation_result[0]
+                self.logger.save_model(self.model, val_mse, epoch)
 
-        pbar.update()
-        pbar.set_postfix({loss_function.__class__.__name__: loss.item(), 'cuda_queue_len': cuda_batches_queue.qsize()})
+        except KeyboardInterrupt:
+            pass
 
-        logger.tb_writer.add_scalar('train_loss_per_step', loss_history[-1], current_epoch * per_step_epoch + batch_idx)
+        finally:
+            for i in (
+                    self.train_batch_factory,
+                    self.validation_batch_factory,):
+                i.stop()
 
-        if lr_scheduler is not None:
-            lr_scheduler.step()
-        else:
-            if not warning_elapsed:
-                warnings.warn('lr_scheduler is None')
-                warning_elapsed = True
+        print('train_model: done')
+        return self.best_model_saver.best_val_metric
 
-    pbar.close()
+    def train_single_epoch(self, current_epoch: int):
+        self.model.train()
+        loss_history = []
+        pbar = tqdm(total=self.steps_per_epoch_train, ncols=100)
+        pbar.set_description(desc='train')
 
-    loss_mean = np.mean(loss_history)
-    logger.tb_writer.add_scalar('train_loss_per_epoch', loss_mean, current_epoch)
+        for batch_idx in range(self.steps_per_epoch_train):
+            batch = self.train_batch_factory.cuda_queue.get(block=True)
 
-    return loss_mean
+            if batch_idx == 0 and current_epoch == 0:
+                self.logger.store_batch_as_image('train_batch', batch.images,
+                                                 global_step=current_epoch,
+                                                 inv_normalizer=Normalizer.inv_normalizer)
 
+            self.optimizer.zero_grad()
+            model_output = self.model(batch)
+            loss = self.loss(model_output, batch)
+            loss_history.append(loss.item())
 
-def validate_single_epoch(model: torch.nn.Module,
-                          metrics: list[Metric, ...],
-                          cuda_batches_queue: Queue,
-                          per_step_epoch: int,
-                          current_epoch: int,
-                          logger: Logger,
-                          ):
-    model.eval()
-    metrics_values = [[] for _ in metrics]
+            loss.backward()
+            self.optimizer.step()
 
-    pbar = tqdm(total=per_step_epoch, ncols=100)
-    pbar.set_description(desc='validation')
+            pbar.update()
+            pbar.set_postfix({
+                self.loss.__class__.__name__: loss.item(),
+                'cuda_queue_len': self.train_batch_factory.cuda_queue.qsize()
+            })
 
-    for batch_idx in range(per_step_epoch):
-        batch = cuda_batches_queue.get(block=True)
+            self.logger.tb_writer.add_scalar('train_loss_per_step', loss_history[-1],
+                                             current_epoch * self.steps_per_epoch_train + batch_idx)
 
-        with torch.no_grad():
-            model_output = model(batch)
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
 
-        if batch_idx == 0 and current_epoch == 0:
-            logger.store_batch_as_image('val_batch', batch.images,
-                                        global_step=current_epoch,
-                                        inv_normalizer=Normalizer.inv_normalizer)
+        pbar.close()
 
-        for i, metric in enumerate(metrics):
-            metrics_values[i].append(metric(model_output, batch).item())
+        loss_mean = np.mean(loss_history)
+        self.logger.tb_writer.add_scalar('train_loss_per_epoch', loss_mean, current_epoch)
 
-        pbar.update()
-        metrics_pbar = {f'validation {metrics[i].__class__.__name__}': metrics_values[i][-1]
-                        for i in range(len(metrics))}
-        pbar.set_postfix({**metrics_pbar, 'cuda_queue_len': cuda_batches_queue.qsize()})
-    pbar.close()
+        return loss_mean
 
-    metrics_values = [np.mean(i) for i in metrics_values]
+    def validate_single_epoch(self, current_epoch: int):
+        self.model.eval()
+        metrics_values = [[] for _ in self.validation_metrics]
 
-    for i in range(len(metrics)):
-        logger.tb_writer.add_scalar(metrics[i].__class__.__name__, metrics_values[i], current_epoch)
+        pbar = tqdm(total=self.steps_per_epoch_valid, ncols=100)
+        pbar.set_description(desc='validation')
 
-    return metrics_values
+        for batch_idx in range(self.steps_per_epoch_valid):
+            batch = self.validation_batch_factory.cuda_queue.get(block=True)
 
+            with torch.no_grad():
+                model_output = self.model(batch)
 
-def train_model(model: ResnetRegressor,
-                loss: Metric,
-                validation_metrics: list[Metric],
-                train_batch_factory: BatchFactory,
-                validation_batch_factory: BatchFactory,
-                logger: Logger,
-                max_epochs: int,
-                steps_per_epoch_train: int,
-                steps_per_epoch_valid: int,
-                train_convolutional_since_epoch: int,
-                optimizer: torch.optim.Optimizer,
-                lr_scheduler: Union[None, CosineAnnealingWarmupRestarts]):
-    best_val_loss = float('Inf')
-    best_val_epoch = -1
+            if batch_idx == 0 and current_epoch == 0:
+                self.logger.store_batch_as_image('val_batch', batch.images,
+                                                 global_step=current_epoch,
+                                                 inv_normalizer=Normalizer.inv_normalizer)
 
-    try:
-        for epoch in range(max_epochs):
-            print(f'Epoch {epoch} / {max_epochs}')
+            for i, metric in enumerate(self.validation_metrics):
+                metrics_values[i].append(metric(model_output, batch).item())
 
-            # enable training of convolutional part at desired epoch
-            if train_convolutional_since_epoch is not None and train_convolutional_since_epoch == epoch:
-                print('train convolutional on')
-                model.set_train_convolutional_part(True)
+            pbar.update()
+            metrics_pbar = {f'validation {self.validation_metrics[i].__class__.__name__}': metrics_values[i][-1]
+                            for i in range(len(self.validation_metrics))}
+            pbar.set_postfix({**metrics_pbar, 'cuda_queue_len': self.validation_batch_factory.cuda_queue.qsize()})
+        pbar.close()
 
-            train_loss = train_single_epoch(model,
-                                            optimizer,
-                                            loss,
-                                            train_batch_factory.cuda_queue,
-                                            steps_per_epoch_train,
-                                            current_epoch=epoch,
-                                            logger=logger,
-                                            lr_scheduler=lr_scheduler)
-            print(f'Train loss: {train_loss}')
+        metrics_values = [np.mean(i) for i in metrics_values]
 
-            validation_result = validate_single_epoch(model,
-                                                      validation_metrics,
-                                                      validation_batch_factory.cuda_queue,
-                                                      steps_per_epoch_valid,
-                                                      current_epoch=epoch,
-                                                      logger=logger)
-            print(f'Validation result: {validation_result}')
+        for i in range(len(self.validation_metrics)):
+            self.logger.tb_writer.add_scalar(
+                self.validation_metrics[i].__class__.__name__, metrics_values[i], current_epoch)
 
-            # todo implement model saver
-            val_mse = validation_result[0]
-            if best_val_loss > val_mse:
-                # save new model
-                torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
-                # delete old model
-                old_model_path = os.path.join(logger.misc_dir, f'model_ep{best_val_epoch}.pt')
-                if os.path.exists(old_model_path):
-                    os.remove(old_model_path)
-                # update best values
-                best_val_loss = val_mse
-                best_val_epoch = epoch
-
-    except KeyboardInterrupt:
-        pass
-
-    finally:
-        for i in (
-                train_batch_factory,
-                validation_batch_factory,):
-            i.stop()
-
-    print('train_model: done')
-    return best_val_loss
+        return metrics_values

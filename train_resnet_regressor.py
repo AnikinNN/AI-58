@@ -7,7 +7,7 @@ from regressor_on_resnet.nn_logging import Logger
 from regressor_on_resnet.metadata_loader import MetadataLoader
 from regressor_on_resnet.resnet_regressor import ResnetRegressor
 from regressor_on_resnet.sgdr_restarts_warmup import CosineAnnealingWarmupRestarts
-from regressor_on_resnet.train_common import train_model
+from regressor_on_resnet.train_common import Trainer
 
 learning_rate = 20e-5
 batch_size = 32
@@ -18,16 +18,17 @@ batch_fields = ['images',
                 'elevations']
 output_size = (512, 512)
 
-logger = Logger()
+logger = Logger(model_save_type='min')
 
-metadata_loader = MetadataLoader(('./../cloud_applications_v2/expeditions_configs/AI-58-config.json',
-                                  './../cloud_applications_v2/expeditions_configs/AMK-79-config.json',
-                                  './../cloud_applications_v2/expeditions_configs/ABP-42-config.json',
-                                  './../cloud_applications_v2/expeditions_configs/AI-52-config.json',
-                                  ),
-                                 radiation_threshold=10,
-                                 split=(0.6, 0.2, 0.2),
-                                 store_path=logger.misc_dir)
+metadata_loader = MetadataLoader((
+    # './../cloud_applications_v2/expeditions_configs/AI-58-config.json',
+    # './../cloud_applications_v2/expeditions_configs/AMK-79-config.json',
+    # './../cloud_applications_v2/expeditions_configs/ABP-42-config.json',
+    './../cloud_applications_v2/expeditions_configs/AI-52-config.json',
+),
+    radiation_threshold=10,
+    split=(0.6, 0.2, 0.2),
+    store_path=logger.misc_dir)
 
 train_dataset, val_dataset = [
     FluxDataset(flux_frame=i,
@@ -70,7 +71,7 @@ lr_scheduler = CosineAnnealingWarmupRestarts(optimizer,
                                              warmup_steps=0,
                                              gamma=0.8,
                                              last_epoch=-1)
-train_model(
+trainer = Trainer(
     model=model,
     loss=loss,
     validation_metrics=[loss],
@@ -84,4 +85,6 @@ train_model(
     optimizer=optimizer,
     lr_scheduler=lr_scheduler,
 )
+
+trainer.train_model()
 print()
