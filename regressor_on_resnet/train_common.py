@@ -69,7 +69,7 @@ class Trainer:
                 i.stop()
 
         print('train_model: done')
-        return self.best_model_saver.best_val_metric
+        return self.logger.best_model_saver.best_val_metric
 
     def train_single_epoch(self, current_epoch: int):
         self.model.train()

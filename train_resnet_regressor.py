@@ -21,9 +21,9 @@ output_size = (512, 512)
 logger = Logger(model_save_type='min')
 
 metadata_loader = MetadataLoader((
-    # './../cloud_applications_v2/expeditions_configs/AI-58-config.json',
-    # './../cloud_applications_v2/expeditions_configs/AMK-79-config.json',
-    # './../cloud_applications_v2/expeditions_configs/ABP-42-config.json',
+    './../cloud_applications_v2/expeditions_configs/AI-58-config.json',
+    './../cloud_applications_v2/expeditions_configs/AMK-79-config.json',
+    './../cloud_applications_v2/expeditions_configs/ABP-42-config.json',
     './../cloud_applications_v2/expeditions_configs/AI-52-config.json',
 ),
     radiation_threshold=10,
@@ -59,7 +59,7 @@ validation_batch_factory = BatchFactory(dataset=val_dataset,
 model = ResnetRegressor()
 model.to(cuda_device)
 
-steps_per_epoch_train = 10  # 1024
+steps_per_epoch_train = 1024
 
 loss = MseLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -78,7 +78,7 @@ trainer = Trainer(
     train_batch_factory=train_batch_factory,
     validation_batch_factory=validation_batch_factory,
     logger=logger,
-    max_epochs=4,
+    max_epochs=256,
     steps_per_epoch_train=steps_per_epoch_train,
     steps_per_epoch_valid=steps_per_epoch_train // 2,
     train_convolutional_since_epoch=128,
