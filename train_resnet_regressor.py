@@ -2,6 +2,7 @@ import torch
 
 from regressor_on_resnet.batch_factory import BatchFactory
 from regressor_on_resnet.flux_dataset import FluxDataset
+from regressor_on_resnet.metrics import MseLoss
 from regressor_on_resnet.nn_logging import Logger
 from regressor_on_resnet.metadata_loader import MetadataLoader
 from regressor_on_resnet.resnet_regressor import ResnetRegressor
@@ -59,7 +60,7 @@ model.to(cuda_device)
 
 steps_per_epoch_train = 10  # 1024
 
-loss = torch.nn.MSELoss()
+loss = MseLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 lr_scheduler = CosineAnnealingWarmupRestarts(optimizer,
                                              first_cycle_steps=32 * steps_per_epoch_train,
@@ -72,6 +73,7 @@ lr_scheduler = CosineAnnealingWarmupRestarts(optimizer,
 train_model(
     model=model,
     loss=loss,
+    validation_metrics=[loss],
     train_batch_factory=train_batch_factory,
     validation_batch_factory=validation_batch_factory,
     logger=logger,

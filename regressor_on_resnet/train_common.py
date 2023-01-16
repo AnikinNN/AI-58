@@ -6,6 +6,7 @@ import torch
 from tqdm import tqdm
 from queue import Queue
 
+from regressor_on_resnet.metrics import Metric
 from regressor_on_resnet.nn_logging import Logger
 from regressor_on_resnet.sgdr_restarts_warmup import CosineAnnealingWarmupRestarts
 from regressor_on_resnet.batch_factory import BatchFactory
@@ -15,7 +16,7 @@ from regressor_on_resnet.resnet_regressor import ResnetRegressor
 
 def train_single_epoch(model: torch.nn.Module,
                        optimizer: torch.optim.Optimizer,
-                       loss_function,
+                       loss_function: Metric,
                        cuda_batches_queue: Queue,
                        per_step_epoch: int,
                        current_epoch: int,
@@ -38,15 +39,15 @@ def train_single_epoch(model: torch.nn.Module,
                                         inv_normalizer=Normalizer.inv_normalizer)
 
         optimizer.zero_grad()
-        data_out = model(batch.images, batch.elevations)
-        loss = loss_function(data_out, batch.fluxes)
+        model_output = model(batch.images, batch.elevations)
+        loss = loss_function(model_output, batch)
         loss_history.append(loss.item())
 
         loss.backward()
         optimizer.step()
 
         pbar.update()
-        pbar.set_postfix({'loss': loss.item(), 'cuda_queue_len': cuda_batches_queue.qsize()})
+        pbar.set_postfix({loss_function.__class__.__name__: loss.item(), 'cuda_queue_len': cuda_batches_queue.qsize()})
 
         logger.tb_writer.add_scalar('train_loss_per_step', loss_history[-1], current_epoch * per_step_epoch + batch_idx)
 
@@ -66,45 +67,48 @@ def train_single_epoch(model: torch.nn.Module,
 
 
 def validate_single_epoch(model: torch.nn.Module,
-                          loss_function: torch.nn.Module,
-                          quality_function: torch.nn.Module,
+                          metrics: list[Metric, ...],
                           cuda_batches_queue: Queue,
                           per_step_epoch: int,
                           current_epoch: int,
                           logger: Logger,
                           ):
     model.eval()
-    loss_values = []
-    qualities = []
+    metrics_values = [[] for _ in metrics]
 
     pbar = tqdm(total=per_step_epoch, ncols=100)
     pbar.set_description(desc='validation')
+
     for batch_idx in range(per_step_epoch):
         batch = cuda_batches_queue.get(block=True)
 
         with torch.no_grad():
-            data_out = model(batch.images, batch.elevations)
+            model_output = model(batch.images, batch.elevations)
 
         if batch_idx == 0 and current_epoch == 0:
             logger.store_batch_as_image('val_batch', batch.images,
                                         global_step=current_epoch,
                                         inv_normalizer=Normalizer.inv_normalizer)
 
-        loss = loss_function(data_out, batch.fluxes)
-        loss_values.append(loss.item())
-
-        quality = quality_function(data_out, batch.fluxes)
-        qualities.append(quality.item())
+        for i, metric in enumerate(metrics):
+            metrics_values[i].append(metric(model_output, batch).item())
 
         pbar.update()
-        pbar.set_postfix({'loss': loss_values[-1], 'cuda_queue_len': cuda_batches_queue.qsize()})
+        metrics_pbar = {metrics[i].__class__.__name__: metrics_values[i][-1] for i in range(len(metrics))}
+        pbar.set_postfix({**metrics_pbar, 'cuda_queue_len': cuda_batches_queue.qsize()})
     pbar.close()
 
-    return np.mean(loss_values), np.mean(qualities)
+    metrics_values = [np.mean(i) for i in metrics_values]
+
+    for i in range(len(metrics)):
+        logger.tb_writer.add_scalar(metrics[i].__class__.__name__, metrics_values[i], current_epoch)
+
+    return metrics_values
 
 
 def train_model(model: ResnetRegressor,
                 loss,
+                validation_metrics: list[Metric],
                 train_batch_factory: BatchFactory,
                 validation_batch_factory: BatchFactory,
                 logger: Logger,
@@ -134,18 +138,18 @@ def train_model(model: ResnetRegressor,
                                             current_epoch=epoch,
                                             logger=logger,
                                             lr_scheduler=lr_scheduler)
+            print(f'Train loss: {train_loss}')
 
-            val_weighted_mse, val_mse = validate_single_epoch(model,
-                                                              loss,
-                                                              loss,
-                                                              validation_batch_factory.cuda_queue,
-                                                              steps_per_epoch_valid,
-                                                              current_epoch=epoch,
-                                                              logger=logger)
-            logger.tb_writer.add_scalar('val_mse', val_mse, epoch)
-            logger.tb_writer.add_scalar('val_weighted_mse', val_weighted_mse, epoch)
-            print(f'Validation loss: {val_mse}')
+            validation_result = validate_single_epoch(model,
+                                                      validation_metrics,
+                                                      validation_batch_factory.cuda_queue,
+                                                      steps_per_epoch_valid,
+                                                      current_epoch=epoch,
+                                                      logger=logger)
+            print(f'Validation result: {validation_result}')
 
+            # todo implement model saver
+            val_mse = validation_result[0]
             if best_val_loss > val_mse:
                 # save new model
                 torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
