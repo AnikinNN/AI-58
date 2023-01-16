@@ -1,16 +1,16 @@
 import threading
 from queue import Queue
-
-import numpy as np
 import torch
-from torch.autograd import Variable
 
 from regressor_on_resnet.flux_dataset import FluxDataset
 from regressor_on_resnet.gpu_augmenter import Augmenter
+from regressor_on_resnet.normalizer import Normalizer
 
 
 class ThreadKiller:
     """Boolean object for signaling a worker thread to terminate"""
+    # todo delete class, replace usages with threading.Event
+
     def __init__(self):
         self.to_kill = False
 
@@ -21,7 +21,7 @@ class ThreadKiller:
         self.to_kill = to_kill
 
 
-def threaded_batches_feeder(to_kill, target_queue, dataset_generator):
+def threaded_batches_feeder(to_kill: ThreadKiller, target_queue: Queue, dataset_generator: FluxDataset):
     """
     takes batch from dataset_generator and put to target_queue until to_kill
     """
@@ -32,33 +32,24 @@ def threaded_batches_feeder(to_kill, target_queue, dataset_generator):
             return
 
 
-def threaded_cuda_feeder(to_kill, target_queue, source_queue, cuda_device, to_variable, do_augment):
+def threaded_cuda_feeder(to_kill: ThreadKiller,
+                         target_queue: Queue,
+                         source_queue: Queue,
+                         cuda_device: torch.device,
+                         to_variable: bool,
+                         do_augment: bool):
     """
     takes batch from source_queue, transforms data to tensors, puts to target_queue until to_kill
     """
     while not to_kill():
-        cuda_device = torch.device(cuda_device)
         batch = source_queue.get(block=True)
         batch.to_tensor()
-        batch.to_cuda(cuda_device, to_variable)
+        batch.to_cuda(to_variable, cuda_device)
         if do_augment:
             batch.images, batch.masks, batch.elevations = Augmenter.call(batch)
-        batch.elevations = torch.sin(torch.deg2rad(batch.elevations))
-        batch.images = Augmenter.normalizer(batch.images)
+        batch.elevations = torch.deg2rad(batch.elevations)
+        batch.images = Normalizer.call(batch.images)
         batch.images = batch.images * batch.masks
-        target_queue.put(batch, block=True)
-    print('cuda_feeder_killed')
-    return
-
-
-def threaded_cuda_augmenter(to_kill, target_queue, source_queue, do_augment):
-    """
-    takes batch from source_queue, applies augmentations if do_augment, applies mask, puts to target_queue until to_kill
-    """
-    while not to_kill():
-        batch = source_queue.get(block=True)
-        if do_augment:
-            batch.images = Augmenter.call(batch)
         target_queue.put(batch, block=True)
     print('cuda_feeder_killed')
     return
@@ -67,13 +58,13 @@ def threaded_cuda_augmenter(to_kill, target_queue, source_queue, do_augment):
 class BatchFactory:
     def __init__(self,
                  dataset: FluxDataset,
-                 cuda_device,
+                 cuda_device: torch.device,
                  do_augment: bool,
-                 cpu_queue_length: int = 4,
-                 cuda_queue_length: int = 4,
-                 preprocess_worker_number: int = 4,
-                 cuda_feeder_number: int = 1,
-                 to_variable: bool = True,
+                 cpu_queue_length: int,
+                 cuda_queue_length: int,
+                 preprocess_worker_number: int,
+                 cuda_feeder_number: int,
+                 to_variable: bool,
                  ):
         self.cpu_queue = Queue(maxsize=cpu_queue_length)
         self.cuda_queue = Queue(maxsize=cuda_queue_length)

@@ -1,18 +1,12 @@
 import numpy as np
 import torch
 from torchvision import transforms
+from torchvision.transforms import functional
 
-from regressor_on_resnet.flux_batch import FluxBatch
+from regressor_on_resnet.batch import FluxBatch
 
 
 class Augmenter:
-    normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-
-    inv_normalizer = transforms.Compose([
-        transforms.Normalize((0., 0., 0.), (1 / 0.229, 1 / 0.224, 1 / 0.225)),
-        transforms.Normalize((-0.485, -0.456, -0.406), (1., 1., 1.)),
-    ])
-
     class Sampler:
         def __init__(self):
             self.rotation_angle = self.sampler(5)
@@ -59,4 +53,8 @@ class Augmenter:
 
     @classmethod
     def call(cls, batch: FluxBatch):
+        """
+        images in range [0, 1]
+        elevations in range [0, 90]
+        """
         return cls.__call__(batch)

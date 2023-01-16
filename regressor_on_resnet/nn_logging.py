@@ -14,7 +14,7 @@ import torch
 class Logger:
     experiment = None
 
-    def __init__(self, base_log_dir=None):
+    def __init__(self, model_save_type: str, base_log_dir=None,):
         if base_log_dir is None:
             base_log_dir = os.path.join(os.path.dirname(sys.argv[0]), 'logs')
         self.base_log_dir = base_log_dir
@@ -29,6 +29,7 @@ class Logger:
             make_dir(i)
 
         self.tb_writer = SummaryWriter(log_dir=self.tb_dir)
+        self.best_model_saver = BestModelSaver(model_save_type)
 
     def get_tb_writer(self):
         return self.tb_writer
@@ -54,6 +55,42 @@ class Logger:
         ax.grid()
         ax.scatter(x, y, s=1)
         self.tb_writer.add_figure('hard_mining_weights', [fig], epoch)
+
+    def save_model(self, model: torch.nn.Module, val_metric: float, epoch: int):
+        self.best_model_saver.save(model, val_metric, self, epoch)
+
+
+class BestModelSaver:
+    def __init__(self, saving_type: str):
+        self.saving_type = saving_type
+        self.best_val_epoch = -1
+
+        if self.saving_type == 'max':
+            self.best_val_metric = - float('Inf')
+            self.compare = self.max_compare
+        elif self.saving_type == 'min':
+            self.best_val_metric = float('Inf')
+            self.compare = self.min_compare
+        else:
+            raise ValueError(f'{saving_type=} but must be max or min')
+
+    def save(self, model: torch.nn.Module, val_metric: float, logger: Logger, epoch: int):
+        if self.compare(val_metric):
+            # save new model
+            torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
+            # delete old model
+            old_model_path = os.path.join(logger.misc_dir, f'model_ep{self.best_val_epoch}.pt')
+            if os.path.exists(old_model_path):
+                os.remove(old_model_path)
+            # update best values
+            self.best_val_metric = val_metric
+            self.best_val_epoch = epoch
+
+    def max_compare(self, new_value):
+        return new_value > self.best_val_metric
+
+    def min_compare(self, new_value):
+        return new_value < self.best_val_metric
 
 
 def make_dir(path):

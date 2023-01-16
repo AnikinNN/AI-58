@@ -2,6 +2,7 @@ import torch
 import torchvision.models as models
 import torch.nn as nn
 
+from regressor_on_resnet.batch import FluxBatch
 from regressor_on_resnet.mish import Mish
 
 
@@ -32,9 +33,10 @@ class ResnetBase(torch.nn.Module):
 
         self.tail = torch.nn.Sequential(*layers)
 
-    def forward(self, image_batch: torch.Tensor, elevation_batch: torch.Tensor):
-        features = self.resnet(image_batch)
-        result = self.tail(torch.cat((features, elevation_batch), dim=1))
+    def forward(self, batch: FluxBatch):
+        features = self.resnet(batch.images)
+        sin_elevation = torch.sin(batch.elevations)
+        result = self.tail(torch.cat((features, sin_elevation), dim=1))
         return result
 
     def set_train_convolutional_part(self, value: bool):
