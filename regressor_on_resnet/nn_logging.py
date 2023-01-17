@@ -14,7 +14,7 @@ import torch
 class Logger:
     experiment = None
 
-    def __init__(self, model_save_type: str, base_log_dir=None,):
+    def __init__(self, model_save_type: str = None, base_log_dir=None,):
         if base_log_dir is None:
             base_log_dir = os.path.join(os.path.dirname(sys.argv[0]), 'logs')
         self.base_log_dir = base_log_dir
@@ -29,7 +29,11 @@ class Logger:
             make_dir(i)
 
         self.tb_writer = SummaryWriter(log_dir=self.tb_dir)
-        self.best_model_saver = BestModelSaver(model_save_type)
+
+        if model_save_type is not None:
+            self.best_model_saver = BestModelSaver(model_save_type)
+        else:
+            self.best_model_saver = None
 
     def get_tb_writer(self):
         return self.tb_writer
@@ -57,7 +61,7 @@ class Logger:
         self.tb_writer.add_figure('hard_mining_weights', [fig], epoch)
 
     def save_model(self, model: torch.nn.Module, val_metric: float, epoch: int):
-        self.best_model_saver.save(model, val_metric, self, epoch)
+        self.best_model_saver.save(model, val_metric, self.misc_dir, epoch)
 
 
 class BestModelSaver:
@@ -74,12 +78,12 @@ class BestModelSaver:
         else:
             raise ValueError(f'{saving_type=} but must be max or min')
 
-    def save(self, model: torch.nn.Module, val_metric: float, logger: Logger, epoch: int):
+    def save(self, model: torch.nn.Module, val_metric: float, dir_path: str, epoch: int):
         if self.compare(val_metric):
             # save new model
-            torch.save(model, os.path.join(logger.misc_dir, f'model_ep{epoch}.pt'))
+            torch.save(model, os.path.join(dir_path, f'model_ep{epoch}.pt'))
             # delete old model
-            old_model_path = os.path.join(logger.misc_dir, f'model_ep{self.best_val_epoch}.pt')
+            old_model_path = os.path.join(dir_path, f'model_ep{self.best_val_epoch}.pt')
             if os.path.exists(old_model_path):
                 os.remove(old_model_path)
             # update best values
