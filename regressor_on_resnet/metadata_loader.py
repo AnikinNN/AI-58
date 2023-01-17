@@ -40,6 +40,7 @@ class MetadataLoader:
         expedition.merge_elevation_to_events()
         df = expedition.df_events[expedition.df_events['CM3up[W/m2]'] > self.radiation_threshold]
         df = df.dropna(subset=['sun_altitude'])
+        df['expedition_name'] = expedition.expedition_name
         df.reset_index(drop=True, inplace=True)
         self.extend_all(df)
 
