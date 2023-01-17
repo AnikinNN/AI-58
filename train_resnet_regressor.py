@@ -25,6 +25,8 @@ metadata_loader = MetadataLoader((
     './../cloud_applications_v2/expeditions_configs/AMK-79-config.json',
     './../cloud_applications_v2/expeditions_configs/ABP-42-config.json',
     './../cloud_applications_v2/expeditions_configs/AI-52-config.json',
+    './../cloud_applications_v2/expeditions_configs/AI-49-config.json',
+    # './../cloud_applications_v2/expeditions_configs/ANS-31-config.json',
 ),
     radiation_threshold=10,
     split=(0.6, 0.2, 0.2),
