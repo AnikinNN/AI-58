@@ -22,6 +22,7 @@ def get_photo_names(photos_path):
 
 
 def get_full_path(photo_name, photos_base_dir):
+    raise NotImplementedError
     return os.path.join(photos_base_dir, "snapshots-" + extract_time(photo_name)[:10], photo_name)
 
 
@@ -66,13 +67,12 @@ def init_events(photos_base_dir):
     photo_names = get_photo_names(photos_base_dir)
     df_events = pd.DataFrame(photo_names, columns=["photo_name"])
 
-    df_events["photo_datetime"] = df_events["photo_name"].map(extract_time)
-
     df_events["photo_path"] = get_full_path_on_series(df_events["photo_name"], photos_base_dir)
 
-    df_events["camera_id"] = df_events["photo_name"].map(lambda x: int(x[28: -4]))
+    df_events["camera_id"] = df_events["photo_name"].str.slice(28, -4)
 
-    df_events["photo_datetime"] = pd.to_datetime(df_events["photo_datetime"])
+    # img-2021-08-07T18-02-19devID1.jpg
+    df_events["photo_datetime"] = pd.to_datetime(df_events["photo_name"].str.slice(4, 23), format='%Y-%m-%dT%H-%M-%S')
 
     df_events.sort_values(by="photo_datetime", inplace=True)
 

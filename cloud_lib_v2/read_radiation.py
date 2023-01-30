@@ -33,7 +33,9 @@ def read_single_radiation_file(path):
     # assign column names
     result.columns = columns
 
-    corrupted_selection = pd.to_datetime(result['data time'], format="%d/%m/%Y %H:%M:%S").isna()
+    result["radiation_datetime"] = pd.to_datetime(result['data time'], format="%d/%m/%Y %H:%M:%S")
+
+    corrupted_selection = result["radiation_datetime"].isna()
     if corrupted_selection.sum() > 0:
         print(f'{path}, has {corrupted_selection.sum()} mistakes:\n',
               result[corrupted_selection])
@@ -50,7 +52,7 @@ def read_radiation_from_dir(radiation_dir):
         if re.findall(r"CR20\d{6}.txt", file):
             radiation = pd.concat((radiation, read_single_radiation_file(os.path.join(radiation_dir, file))),
                                   ignore_index=True)
-    radiation["radiation_datetime"] = pd.to_datetime(radiation['data time'], format="%d/%m/%Y %H:%M:%S")
+    # radiation["radiation_datetime"] = pd.to_datetime(radiation['data time'], format="%d/%m/%Y %H:%M:%S")
     radiation.drop(columns='data time', inplace=True)
     radiation.sort_values(by="radiation_datetime", inplace=True)
     return radiation
