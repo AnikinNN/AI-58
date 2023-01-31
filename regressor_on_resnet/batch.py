@@ -17,7 +17,11 @@ class FluxBatch:
             'images',
             'masks',
             'elevations',
-            'fluxes'
+            'fluxes',
+            'true_cloud_class',
+            'true_radiation_class',
+            'predicted_cloud_class',
+            'predicted_radiation_class',
         ]
 
         self.images = []
@@ -97,3 +101,12 @@ class FluxBatch:
                 self.__setattr__(i, attribute)
 
         self.state = FluxBatchState.CUDA_STORING
+
+    @classmethod
+    def is_field_valid(cls, field: str):
+        batch = cls()
+        try:
+            getattr(batch, field)
+        except AttributeError:
+            return False
+        return True

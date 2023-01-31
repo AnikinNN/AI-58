@@ -14,7 +14,7 @@ from regressor_on_resnet.resnet_regressor import ResnetRegressor
 
 class Trainer:
     def __init__(self,
-                 model: ResnetRegressor,
+                 model: torch.nn.Module,
                  loss: Metric,
                  validation_metrics: list[Metric],
                  train_batch_factory: BatchFactory,
@@ -134,7 +134,7 @@ class Trainer:
                 metrics_values[i].append(metric(model_output, batch).item())
 
             pbar.update()
-            metrics_pbar = {f'validation {self.validation_metrics[i].__class__.__name__}': metrics_values[i][-1]
+            metrics_pbar = {f'{self.validation_metrics[i].__class__.__name__}': metrics_values[i][-1]
                             for i in range(len(self.validation_metrics))}
             pbar.set_postfix({**metrics_pbar, 'cuda_queue_len': self.validation_batch_factory.cuda_queue.qsize()})
         pbar.close()

@@ -67,6 +67,8 @@ class FluxDataset:
                 result[field] = row.name
             elif field == 'hard_mining_weights':
                 result[field] = row['hard_mining_weight']
+            elif field == 'true_radiation_class':
+                result[field] = row['radiation_class_oh']
             else:
                 raise ValueError(f'got {field=} which is unsupported')
 
