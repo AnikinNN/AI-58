@@ -1,17 +1,28 @@
-import os.path
-
+from pathlib import Path
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
 
 from cloud_lib_v2.expedition import Expedition
 
 
 class MetadataLoader:
-    def __init__(self, configs, radiation_threshold=10, split=(0.80, 0.10, 0.10), store_path=None):
+    def __init__(self,
+                 configs,
+                 radiation_threshold=10,
+                 split=(0.80, 0.10, 0.10),
+                 store_path: Path = None,
+                 radiation_class_number: int = 0,
+                 cloud_classes: bool = False):
         self.all_df = pd.DataFrame()
         self.train = pd.DataFrame()
         self.validation = pd.DataFrame()
         self.test = pd.DataFrame()
+
+        self.radiation_class_number = radiation_class_number
+        self.radiation_percentile: np.ndarray = None
+        self.cloud_classes = cloud_classes
 
         self.radiation_threshold = radiation_threshold
 
@@ -21,10 +32,13 @@ class MetadataLoader:
 
         self.all_df.sort_values(by="photo_datetime", inplace=True)
         self.all_df['hard_mining_weight'] = 1.0
-        # implement classes
+
+        if self.radiation_class_number > 0:
+            self.init_radiation_classes()
+
         self.split(*split)
         if store_path is not None:
-            self.store_splits(store_path)
+            self.store_metadata(store_path)
 
     def load_data(self, config):
         expedition = Expedition()
@@ -69,8 +83,25 @@ class MetadataLoader:
                          (self.test, 'test')]:
             print(f'{name} len: {df.shape[0]}')
 
-    def store_splits(self, path):
+    def store_metadata(self, path: Path):
+        # store splits
         for df, name in [(self.train, 'train'),
                          (self.validation, 'validation'),
                          (self.test, 'test')]:
-            df.to_csv(os.path.join(path, f'subset_{name}.csv'))
+            df.to_csv(path / f'subset_{name}.csv')
+
+        # store percentiles
+        if self.radiation_percentile is not None:
+            np.save((path / 'radiation_percentile.npy').__str__(), self.radiation_percentile)
+
+    def init_radiation_classes(self):
+        percent = np.linspace(0, 100, self.radiation_class_number + 1)
+        self.radiation_percentile = np.percentile(self.all_df['CM3up[W/m2]'], percent[1:])
+
+        self.all_df['radiation_class'] = 0
+        for i in range(self.radiation_percentile.shape[0]):
+            self.all_df['radiation_class'] = self.all_df['radiation_class'] + (
+                    self.all_df['CM3up[W/m2]'] > self.radiation_percentile[i])
+
+        ohe = OneHotEncoder(sparse=False).fit_transform(self.all_df['radiation_class'].values.reshape(-1, 1))
+        self.all_df['radiation_class_oh'] = pd.Series(list(ohe), index=self.all_df.index)

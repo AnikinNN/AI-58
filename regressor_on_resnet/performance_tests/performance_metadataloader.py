@@ -10,14 +10,16 @@ project_root_path = this_script_path.parent.parent.parent
 yappi.set_clock_type("cpu")
 yappi.start()
 
-metadata_loader = MetadataLoader((
-    project_root_path / 'cloud_applications_v2/expeditions_configs/AI-58-config.json',
-    project_root_path / 'cloud_applications_v2/expeditions_configs/AMK-79-config.json',
-    project_root_path / 'cloud_applications_v2/expeditions_configs/ABP-42-config.json',
-    project_root_path / 'cloud_applications_v2/expeditions_configs/AI-52-config.json',
-    project_root_path / 'cloud_applications_v2/expeditions_configs/AI-49-config.json',
-    # project_root_path / 'cloud_applications_v2/expeditions_configs/ANS-31-config.json',
-),)
+metadata_loader = MetadataLoader(
+    (
+        project_root_path / 'cloud_applications_v2/expeditions_configs/AI-58-config.json',
+        project_root_path / 'cloud_applications_v2/expeditions_configs/AMK-79-config.json',
+        project_root_path / 'cloud_applications_v2/expeditions_configs/ABP-42-config.json',
+        project_root_path / 'cloud_applications_v2/expeditions_configs/AI-52-config.json',
+        project_root_path / 'cloud_applications_v2/expeditions_configs/AI-49-config.json',
+        # project_root_path / 'cloud_applications_v2/expeditions_configs/ANS-31-config.json',
+    ),
+    radiation_class_number=8)
 
 yappi.stop()
 
