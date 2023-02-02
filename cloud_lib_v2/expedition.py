@@ -2,6 +2,7 @@ import json
 import os.path
 import re
 import warnings
+from pathlib import Path
 
 import imageio
 import pandas as pd
@@ -9,6 +10,7 @@ from numpy import ma
 from tqdm import tqdm
 
 from cloud_lib_v2 import photos_processing, read_radiation, image_processing
+from cloud_lib_v2.observation import init_observation
 from cloud_lib_v2.mask import Mask
 
 
@@ -32,7 +34,7 @@ class Expedition:
         # must contain only "CR20[0-9]{6}.txt" files
         self.radiation_dir = None
         # path to observations table
-        self.observations_table = None
+        self.observation_table = None
         # path to elevation table
         self.elevation_table = None
         # path to photos
@@ -45,7 +47,7 @@ class Expedition:
         # dataFrames based on radiation measurement, photos and observations respectively
         self.df_radiation = pd.DataFrame()
         self.df_events = pd.DataFrame()
-        self.df_observations = pd.DataFrame()
+        self.df_observation = pd.DataFrame()
         self.df_elevation = pd.DataFrame()
 
         # progress bar
@@ -61,7 +63,7 @@ class Expedition:
     def init_using_config_dict(self, config):
         for attribute in ("expedition_name",
                           "radiation_dir",
-                          "observations_table",
+                          "observation_table",
                           "elevation_table",
                           "photos_base_dir",
                           "time_tolerance",
@@ -96,19 +98,10 @@ class Expedition:
         self.df_radiation = read_radiation.read_radiation_from_dir(self.radiation_dir)
 
     def init_observation(self):
-        if self.observations_table is None:
-            raise TypeError('self.observations_table must be specified')
+        if self.observation_table is None:
+            raise TypeError('self.observation_table must be specified')
 
-        if self.observations_table.endswith("xlsx"):
-            self.df_observations = pd.read_excel(self.observations_table)
-        elif self.observations_table.endswith("csv"):
-            self.df_observations = pd.read_csv(self.observations_table)
-        else:
-            raise ValueError(f'self.observations_table is {self.observations_table}. Extension must be xlsx or csv')
-
-        self.df_observations.rename(columns={"Date_Time": "observation_datetime"}, inplace=True)
-        self.df_observations["observation_datetime"] = pd.to_datetime(self.df_observations["observation_datetime"])
-        self.df_observations.sort_values(by="observation_datetime", inplace=True)
+        self.df_observation = init_observation(Path(self.observation_table))
 
     def init_elevation(self):
         if self.elevation_table is None:
@@ -134,12 +127,12 @@ class Expedition:
         """
         return self._merge_something_to_events(target='radiation', inplace=inplace)
 
-    def merge_observations_to_events(self, inplace=True):
+    def merge_observation_to_events(self, inplace=True):
         """
-        merge DataFrames, for each df_events row find the nearest row in time from df_observations
+        merge DataFrames, for each df_events row find the nearest row in time from df_observation
         the nearest means that we take nearest after photo, because of experiment design
         write everything in one DataFrame
-        if there is no row in df_observations that fits to tolerance condition, writes NaN
+        if there is no row in df_observation that fits to tolerance condition, writes NaN
 
         inplace: write result of merge to df_events
 
@@ -151,28 +144,25 @@ class Expedition:
         return self._merge_something_to_events(target='elevation', inplace=inplace)
 
     def _merge_something_to_events(self, target=None, inplace=True):
+        targets = ["radiation", "observation", "elevation"]
+
         if not isinstance(self.time_tolerance, pd.Timedelta):
             raise TypeError(f'self.time_tolerance must be pd.Timedelta but got {type(self.time_tolerance)}')
         self.sort_events()
-        if target == 'radiation':
-            datetime_column = 'radiation_datetime'
-            attr = 'df_radiation'
-        elif target == 'observation':
-            datetime_column = 'observation_datetime'
-            attr = 'df_observations'
-        elif target == 'elevation':
-            datetime_column = 'elevation_datetime'
-            attr = 'df_elevation'
+        if target in targets:
+            datetime_column = f'{target}_datetime'
+            attr = f'df_{target}'
         else:
-            raise ValueError('target must be one of ["radiation", "observation", "elevation"]')
+            raise ValueError(f'target must be one of {targets}')
 
-        if datetime_column not in self.__getattribute__(attr).columns:
+        df = self.__getattribute__(attr)
+        if datetime_column not in df.columns:
             raise KeyError(f'{datetime_column} must be in self.{attr}.columns. Probably you forgot init that DataFrame')
-        if not self.__getattribute__(attr).shape[0]:
+        if not df.shape[0]:
             warnings.warn(f'self.{attr} has 0 rows')
 
-        self.__getattribute__(attr).sort_values(by=datetime_column, inplace=True)
-        merged = pd.merge_asof(self.df_events, self.__getattribute__(attr),
+        df.sort_values(by=datetime_column, inplace=True)
+        merged = pd.merge_asof(self.df_events, df,
                                left_on="photo_datetime",
                                right_on=datetime_column,
                                direction="nearest",
@@ -184,7 +174,7 @@ class Expedition:
 
     def delete_outside_datetime(self, a_datetime, b_datetime):
         """
-        deletes rows from df_observations, df_radiation, df_events
+        deletes rows from df_observation, df_radiation, df_events
         that are out of range [a_datetime, b_datetime]
         """
         a_datetime = pd.to_datetime(a_datetime)
@@ -196,7 +186,7 @@ class Expedition:
 
         for df_name, datetime_column in (('df_events', 'photo_datetime'),
                                          ('df_radiation', 'radiation_datetime'),
-                                         ('df_observations', 'observation_datetime')):
+                                         ('df_observation', 'observation_datetime')):
             df = self.__getattribute__(df_name)
             if datetime_column in df.columns:
                 selection = (df[datetime_column] > a_datetime) & \

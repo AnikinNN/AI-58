@@ -1,8 +1,5 @@
 from pathlib import Path
-
 import numpy as np
-import torch
-
 from regressor_on_resnet.metadata_loader import MetadataLoader
 
 this_script_path = Path(__file__)
@@ -38,7 +35,7 @@ def test_init_radiation_classes():
     # check radiation_class's range is an interval [0, 8)
     assert set(i for i in range(8)) == set(metadata_loader.all_df.radiation_class.value_counts().index)
 
-    # check some of one_hot_encodins
+    # check some of one_hot_encodings
     for _ in range(100):
         row = metadata_loader.all_df.sample(n=1, axis='index').iloc[0]
         ohe = np.zeros(8)
@@ -48,7 +45,7 @@ def test_init_radiation_classes():
 
 
 def test_store_metadata(tmpdir: Path):
-    metadata_loader = MetadataLoader(
+    MetadataLoader(
         (project_root_path / 'cloud_applications_v2/expeditions_configs/AI-49-config.json',),
         radiation_class_number=8,
         store_path=tmpdir
